@@ -1,0 +1,45 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.tox/
+.nox/
+
+# Secrets / credentials — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*_secret*
+*credentials*
+*.token
+.secrets/
+secrets/
+
+# Editor / OS / local tool state (not shared)
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+.claude/
+.cursor/

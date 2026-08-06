@@ -1,0 +1,64 @@
+# Release — build + publish to PyPI on version tags (v*)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # GitHub Release
+  id-token: write   # PyPI trusted publishing (OIDC)
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, verify, publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Sync deps
+        run: uv sync --group dev
+
+      - name: Tag must match pyproject version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "tag=$TAG  pyproject=$PKG"
+          test "$TAG" = "$PKG" || {
+            echo "::error::Tag v$TAG does not match project.version=$PKG in pyproject.toml"
+            exit 1
+          }
+
+      - name: Quality gate
+        run: |
+          uv run ruff check cypherglot tests
+          uv run mypy cypherglot
+          uv run pytest --cov=cypherglot --cov-fail-under=60 -q
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Check dist
+        run: uvx twine check dist/*
+
+      - name: Publish to PyPI
+        run: uv publish
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
