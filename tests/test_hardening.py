@@ -30,6 +30,15 @@ def test_list_subscript_parse():
     assert tree.find(a.ListSubscript)
 
 
+def test_positive_pattern_predicate():
+    tree = cypherast.parse_one(
+        "MATCH (n:Person) WHERE (n)-[:R]->(:Item) RETURN n.name LIMIT 10"
+    )
+    pred = tree.find(a.PatternPredicate)
+    assert pred is not None
+    assert pred.not_ is False or pred.not_ is None or not pred.not_
+
+
 def test_not_pattern_predicate():
     tree = cypherast.parse_one("MATCH (n) WHERE NOT (n)-[:R]->() RETURN n")
     assert tree.find(a.PatternPredicate)

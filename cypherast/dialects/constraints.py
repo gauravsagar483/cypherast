@@ -1,6 +1,7 @@
 """Generic dialect constraint rewrites + validators (engine-agnostic helpers).
 
-Callers pass a ``DialectCapabilities`` snapshot. No domain label/rel-type names.
+Callers pass a ``DialectCapabilities`` snapshot. Label names come from
+``GraphSchema`` only — never hard-coded domain vocabulary here.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from cypherast import ast as a
 from cypherast.dialects.capabilities import DialectCapabilities
 from cypherast.errors import ValidationError
+from cypherast.schema import GraphSchema
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,8 +28,9 @@ def apply_capabilities(
     schema: object | None = None,
 ) -> a.AstNode:
     """Rewrite tree to satisfy capability constraints where auto-fix is safe."""
-    _ = schema
     node = tree
+    if caps.require_labelled_nodes:
+        node = ensure_labelled_nodes(node, schema=schema)
     if caps.max_var_length_hops is not None or not caps.allow_unbounded_var_length:
         node = bound_variable_length(
             node,
@@ -100,7 +103,10 @@ def raise_if_invalid(tree: a.AstNode, caps: DialectCapabilities) -> None:
     first = issues[0]
     raise ValidationError(
         first.message,
-        code=first.code if first.code in {"CG1201", "CG1202", "CG1203", "CG1401"} else "CG1401",
+        code=first.code
+        if first.code
+        in {"CG1201", "CG1202", "CG1203", "CG1401", "CG1402"}
+        else "CG1401",
         hint=first.hint or (f"+{len(issues) - 1} more" if len(issues) > 1 else None),
     )
 
@@ -207,6 +213,144 @@ def drop_distinct_beside_aggregate(tree: a.AstNode) -> a.AstNode:
     return tree.transform(_fix, copy=False)
 
 
+def ensure_labelled_nodes(
+    tree: a.AstNode,
+    schema: object | None = None,
+) -> a.AstNode:
+    """Fill missing MATCH node labels from ``GraphSchema`` rel endpoints.
+
+    Uses adjacent relationship types (+ direction) to pick start/end labels.
+    When several labels remain possible, emits a label OR expression
+    (``:a|b``). Also names formerly anonymous nodes once labelled so qualify
+    skipping ``()`` does not leave bare anons after optimize.
+    """
+    gs = schema if isinstance(schema, GraphSchema) else None
+    if gs is None or not gs.rel_types:
+        return tree
+
+    counter = {"n": 0}
+
+    def _name() -> str:
+        counter["n"] += 1
+        return f"_n_{counter['n']}"
+
+    def _existing_labels(n: a.NodePattern) -> set[str]:
+        if not isinstance(n.labels, a.LabelExpression):
+            return set()
+        if n.labels.expression:
+            return {str(n.labels.expression)}
+        if n.labels.labels:
+            return {str(x) for x in n.labels.labels}
+        return set()
+
+    def _apply_labels(n: a.NodePattern, cands: set[str]) -> None:
+        if not cands or _existing_labels(n):
+            return
+        if len(cands) == 1:
+            n.labels = a.LabelExpression(labels=[next(iter(cands))])
+        else:
+            n.labels = a.LabelExpression(
+                labels=[],
+                expression="|".join(sorted(cands)),
+            )
+        if n.variable is None:
+            n.variable = a.Identifier(this=_name())
+
+    def _rel_def(tname: str):
+        rd = gs.rel_types.get(tname) or gs.rel_types.get(tname.lower())
+        if rd is not None:
+            return rd
+        for k, v in gs.rel_types.items():
+            if k.lower() == tname.lower():
+                return v
+        return None
+
+    def _endpoints(types: list[str]) -> tuple[set[str], set[str]]:
+        starts: set[str] = set()
+        ends: set[str] = set()
+        for tname in types:
+            rd = _rel_def(tname)
+            if rd is None:
+                continue
+            for s, e in rd.endpoints:
+                starts.add(s)
+                ends.add(e)
+        return starts, ends
+
+    def _infer_path(path: a.PathPattern) -> None:
+        els = list(path.elements or [])
+        i = 0
+        while i + 2 < len(els):
+            left, rel, right = els[i], els[i + 1], els[i + 2]
+            if not (
+                isinstance(left, a.NodePattern)
+                and isinstance(rel, a.RelationshipPattern)
+                and isinstance(right, a.NodePattern)
+            ):
+                i += 1
+                continue
+            types = [str(t) for t in (rel.types or [])]
+            if not types:
+                i += 2
+                continue
+            starts, ends = _endpoints(types)
+            left_labs = _existing_labels(left)
+            right_labs = _existing_labels(right)
+
+            if left_labs:
+                narrowed_ends: set[str] = set()
+                for tname in types:
+                    rd = _rel_def(tname)
+                    if rd is None:
+                        continue
+                    for s, e in rd.endpoints:
+                        if s in left_labs:
+                            narrowed_ends.add(e)
+                if narrowed_ends:
+                    ends = narrowed_ends
+            if right_labs:
+                narrowed_starts: set[str] = set()
+                for tname in types:
+                    rd = _rel_def(tname)
+                    if rd is None:
+                        continue
+                    for s, e in rd.endpoints:
+                        if e in right_labs:
+                            narrowed_starts.add(s)
+                if narrowed_starts:
+                    starts = narrowed_starts
+
+            d = rel.direction
+            if d is a.Direction.OUTGOING:
+                _apply_labels(left, starts)
+                _apply_labels(right, ends)
+            elif d is a.Direction.INCOMING:
+                _apply_labels(left, ends)
+                _apply_labels(right, starts)
+            else:
+                if starts == ends and len(starts) == 1:
+                    _apply_labels(left, starts)
+                    _apply_labels(right, ends)
+                elif left_labs and not right_labs:
+                    _apply_labels(right, ends if ends else starts)
+                elif right_labs and not left_labs:
+                    _apply_labels(left, starts if starts else ends)
+                elif not left_labs and not right_labs and len(starts | ends) == 1:
+                    one = starts | ends
+                    _apply_labels(left, one)
+                    _apply_labels(right, one)
+            i += 2
+
+    for match in tree.find_all(a.Match):
+        assert isinstance(match, a.Match)
+        if not isinstance(match.pattern, a.Pattern):
+            continue
+        for path in match.pattern.paths or []:
+            if isinstance(path, a.PathPattern):
+                _infer_path(path)
+    return tree
+
+
 def cap_collect_distinct(tree: a.AstNode, *, max_n: int) -> a.AstNode:
     """If > max collect(DISTINCT) in one clause, convert extras to count(DISTINCT).
 
@@ -248,24 +392,78 @@ def cap_collect_distinct(tree: a.AstNode, *, max_n: int) -> a.AstNode:
 
 
 def _unlabelled_nodes(tree: a.AstNode) -> list[ConstraintIssue]:
+    """MATCH/OPTIONAL MATCH nodes must be labelled on first bind.
+
+    Bare ``(var)`` reuse is OK when ``var`` was already bound with a label
+    earlier in the same query (after WITH, only projected labelled names remain).
+    Anonymous ``()`` and new unlabelled ``(x)`` always fail.
+    """
     issues: list[ConstraintIssue] = []
-    for match in tree.find_all(a.Match):
-        assert isinstance(match, a.Match)
+    labelled: set[str] = set()
+
+    def _label_names(n: a.NodePattern) -> list[str]:
+        if isinstance(n.labels, a.LabelExpression):
+            if n.labels.expression:
+                return [str(n.labels.expression)]
+            return list(n.labels.labels or [])
+        return []
+
+    def _check_match(match: a.Match) -> None:
         if not isinstance(match.pattern, a.Pattern):
-            continue
+            return
         for n in match.pattern.walk():
             if not isinstance(n, a.NodePattern):
                 continue
-            labels = n.labels.labels if isinstance(n.labels, a.LabelExpression) else None
-            if not labels:
-                issues.append(
-                    ConstraintIssue(
-                        "CG1401",
-                        "Unlabelled node patterns are not allowed by this dialect",
-                        hint="Always write (var:Label) in MATCH, never (var) alone",
-                    )
+            labels = _label_names(n)
+            var = n.variable.this if isinstance(n.variable, a.Identifier) else None
+            if labels:
+                if var:
+                    labelled.add(var)
+                continue
+            if var is not None and var in labelled:
+                continue
+            where = f"({var})" if var else "()"
+            issues.append(
+                ConstraintIssue(
+                    "CG1402",
+                    f"Unlabelled node pattern {where} is not allowed by this dialect",
+                    hint="Write (var:Label) on first bind; never () or new (var) without a label",
                 )
-                return issues
+            )
+
+    def _apply_with(clause: a.With) -> None:
+        nonlocal labelled
+        nxt: set[str] = set()
+        for expr in clause.expressions or []:
+            if isinstance(expr, a.Alias):
+                src = expr.this.this if isinstance(expr.this, a.Identifier) else None
+                alias = (
+                    expr.alias.this
+                    if isinstance(expr.alias, a.Identifier)
+                    else expr.alias
+                    if isinstance(expr.alias, str)
+                    else None
+                )
+                if src in labelled and alias:
+                    nxt.add(alias)
+            elif isinstance(expr, a.Identifier) and expr.this in labelled:
+                nxt.add(expr.this)
+        labelled = nxt
+
+    root: a.AstNode | None = tree
+    if isinstance(tree, a.Cypher) and isinstance(tree.this, a.Query):
+        root = tree.this
+    if isinstance(root, a.Query) and root.clauses:
+        for clause in root.clauses:
+            if isinstance(clause, a.Match):
+                _check_match(clause)
+            elif isinstance(clause, a.With):
+                _apply_with(clause)
+        return issues
+
+    for match in tree.find_all(a.Match):
+        assert isinstance(match, a.Match)
+        _check_match(match)
     return issues
 
 

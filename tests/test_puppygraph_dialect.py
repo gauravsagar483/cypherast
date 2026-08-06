@@ -105,7 +105,61 @@ def test_validate_unlabelled_match():
         "MATCH (n) RETURN n LIMIT 5",
         dialect="puppygraph",
     )
-    assert any("Unlabelled" in i.message for i in issues)
+    assert any(i.code == "CG1402" or "Unlabelled" in i.message for i in issues)
+
+
+def test_validate_bound_reuse_unlabelled_ok():
+    """Bare (a) after labelled bind is not CG1402 (OPTIONAL MATCH / chain)."""
+    issues = cypherast.validate(
+        "MATCH (a:person) OPTIONAL MATCH (a)-[:knows]->(b:person) RETURN a.name, b.name LIMIT 20",
+        dialect="puppygraph",
+    )
+    assert not any(i.code == "CG1402" for i in issues)
+
+
+def test_validate_new_unlabelled_endpoint_still_fails():
+    issues = cypherast.validate(
+        "MATCH (a:person)-[:knows|created]->(b) RETURN a.name LIMIT 20",
+        dialect="puppygraph",
+    )
+    assert any(i.code == "CG1402" and "(b)" in i.message for i in issues)
+
+
+def test_optimize_labels_anonymous_endpoints():
+    """PuppyGraph optimize fills () from default schema — no CG1402 after."""
+    opt = cypherast.optimize(
+        "MATCH ()-[e:knows]->() RETURN e LIMIT 20",
+        write="puppygraph",
+    )
+    out = opt.cypher(dialect="puppygraph")
+    assert "()" not in out.replace(" ", "")
+    assert ":person" in out.lower()
+    assert "knows" in out.lower()
+    issues = cypherast.validate(opt, dialect="puppygraph")
+    assert not any(i.code == "CG1402" for i in issues)
+
+
+def test_optimize_labels_multi_rel_end():
+    """knows|created → end gets :person|software from schema."""
+    opt = cypherast.optimize(
+        "MATCH (a:person)-[:knows|created]->(b) RETURN a.name, labels(b) AS labs LIMIT 20",
+        write="puppygraph",
+    )
+    out = opt.cypher(dialect="puppygraph")
+    assert "person|software" in out.lower() or (":person" in out.lower() and "software" in out.lower())
+    issues = cypherast.validate(opt, dialect="puppygraph")
+    assert not any(i.code == "CG1402" for i in issues)
+
+
+def test_positive_pattern_pred_optimize_puppygraph():
+    out = cypherast.optimize(
+        "MATCH (n:person) WHERE (n)-[:created]->(:software) RETURN n.name LIMIT 20",
+        read="puppygraph",
+        write="puppygraph",
+    ).cypher(dialect="puppygraph")
+    assert "EXISTS" not in out.upper()
+    assert "WHERE" in out.upper()
+    assert "created" in out.lower()
 
 
 def test_optimize_opencypher_unchanged_caps():

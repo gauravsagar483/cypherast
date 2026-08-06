@@ -8,6 +8,7 @@ from cypherast.dialects.constraints import (
     bound_variable_length,
     cap_collect_distinct,
     drop_distinct_beside_aggregate,
+    ensure_labelled_nodes,
     ensure_row_limit,
     split_multi_path_match,
 )
@@ -46,6 +47,13 @@ ALL_CANONICAL_RULES = RULES + OPTIONAL_RULES
 def constraint_rules(caps: DialectCapabilities) -> RuleSet:
     """Build dialect constraint RuleSet from a capabilities snapshot."""
     rules: list[Rule] = []
+
+    if caps.require_labelled_nodes:
+
+        def _labels(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
+            return ensure_labelled_nodes(tree, schema=schema)
+
+        rules.append(Rule("ensure_labelled_nodes", _labels))
 
     if caps.max_var_length_hops is not None or not caps.allow_unbounded_var_length:
         max_hops = caps.max_var_length_hops or 5

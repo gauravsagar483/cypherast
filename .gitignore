@@ -12,6 +12,7 @@ dist/
 .coverage
 htmlcov/
 coverage.xml
+scripts/*_results.json
 *.cover
 .hypothesis/
 .tox/

@@ -102,6 +102,7 @@ class Dialect:
             constraints=cls.constraint_rule_set(),
             constraint_only=constraint_only,
             constraint_disable=constraint_disable,
+            require_labelled_nodes=cls.capabilities.require_labelled_nodes,
         )
         if strict:
             raise_if_invalid(node, cls.capabilities)

@@ -43,6 +43,7 @@ ERROR_CODES: dict[str, str] = {
     "CG1304": "Endpoint constraint violation",
     # Compatibility CG14xx
     "CG1401": "Construct not supported by target dialect",
+    "CG1402": "Unlabelled node pattern not allowed by target dialect",
     # Optimize CG15xx
     "CG1501": "Rewrite failed",
     # Plan CG16xx

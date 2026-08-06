@@ -682,28 +682,44 @@ class Parser:
         return a.FunctionCall(name="exists", expressions=[expr])
 
     def _parse_paren_or_pattern(self) -> a.AstNode:
-        # Pattern comprehension: [(n)-->(m) WHERE ... | m.x]
-        # or just (expr)
+        """Parenthesized expression, or positive pattern predicate ``(a)-[:R]->(b)``."""
+        # Pattern predicate (no extra outer wrap): WHERE (n)-[:R]->(:L)
+        if self._looks_like_pattern_start():
+            saved = self._i
+            try:
+                path = self.parse_path_pattern()
+                # Relationship path → pattern predicate (same as NOT (path))
+                if len(path.elements) > 1:
+                    self._match(TokenKind.RPAREN)  # optional ((path))
+                    return a.PatternPredicate(pattern=path, not_=False)
+                # Single-node path: only treat labelled / props as predicate; bare (n) → below
+                if (
+                    len(path.elements) == 1
+                    and isinstance(path.elements[0], a.NodePattern)
+                    and (
+                        path.elements[0].labels is not None
+                        or path.elements[0].properties is not None
+                    )
+                ):
+                    self._match(TokenKind.RPAREN)
+                    return a.PatternPredicate(pattern=path, not_=False)
+                self._i = saved
+            except ParseError:
+                self._i = saved
+
         self._expect(TokenKind.LPAREN)
-        # Heuristic: if we see a node pattern shape, try pattern
+        # Heuristic: if we see a node pattern shape, try pattern / (n) unwrap
         if self._check(TokenKind.IDENT) or self._check(TokenKind.COLON) or self._check(
             TokenKind.RPAREN
         ) or self._check(TokenKind.LBRACE):
-            # Could still be (expr). Peek if this looks like a path.
             saved = self._i
             try:
-                # We're already past '('. Manually build node then maybe rels.
-                self._i -= 1  # back to LPAREN so parse_node_pattern works
-                # Actually _i points after LPAREN. Rewind one.
-                # Wait - we already consumed LPAREN. parse_node_pattern expects LPAREN.
                 self._i = saved - 1
                 path = self.parse_path_pattern()
                 if self._match(TokenKind.WHERE):
-                    self.parse_expression()  # tolerated; path-as-expr rarely has WHERE
+                    self.parse_expression()
                 if self._match(TokenKind.PIPE):
-                    self.parse_expression()  # not a pattern comprehension inside ()
-                # Parenthesized expression that started like a node — if only one node and no rel,
-                # and next is RPAREN, it might be (n) as identifier wrap — reparse as expr
+                    self.parse_expression()
                 if (
                     len(path.elements) == 1
                     and isinstance(path.elements[0], a.NodePattern)
@@ -716,6 +732,9 @@ class Parser:
                     var = path.elements[0].variable
                     assert isinstance(var, a.AstNode)
                     return var
+                if len(path.elements) > 1:
+                    self._match(TokenKind.RPAREN)
+                    return a.PatternPredicate(pattern=path, not_=False)
                 if self._match(TokenKind.RPAREN):
                     return path
             except ParseError:

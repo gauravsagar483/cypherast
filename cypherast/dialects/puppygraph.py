@@ -9,6 +9,7 @@ from cypherast.dialects.capabilities import DialectCapabilities
 from cypherast.dialects.dialect import register
 from cypherast.dialects.opencypher import OpenCypher, OpenCypherRenderer
 from cypherast.renderer import Renderer
+from cypherast.schema import GraphSchema, modern_graph_schema
 
 
 class PuppyGraphRenderer(OpenCypherRenderer):
@@ -52,3 +53,19 @@ class PuppyGraph(OpenCypher):
         default_row_limit=20,
         pattern_predicate_introduces_bindings=False,
     )
+
+    @classmethod
+    def default_schema(cls) -> GraphSchema:
+        """Tutorial person/software schema used when optimize omits ``schema=``."""
+        return modern_graph_schema()
+
+    @classmethod
+    def optimize(
+        cls,
+        tree: a.AstNode,
+        schema: object | None = None,
+        **kwargs: t.Any,
+    ) -> a.AstNode:
+        if schema is None:
+            schema = cls.default_schema()
+        return super().optimize(tree, schema=schema, **kwargs)

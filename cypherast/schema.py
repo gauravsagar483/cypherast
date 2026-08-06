@@ -103,3 +103,22 @@ FUNCTION_SIGNATURES: dict[str, tuple[list[str], str]] = {
 
 def lookup_function(name: str) -> tuple[list[str], str] | None:
     return FUNCTION_SIGNATURES.get(name) or FUNCTION_SIGNATURES.get(name.lower())
+
+
+def modern_graph_schema() -> GraphSchema:
+    """Small person/software tutorial schema (knows, created).
+
+    Used as PuppyGraph's default when callers omit ``schema=`` so
+    ``()-[e:knows]->()`` can be auto-labelled during optimize.
+    """
+    s = GraphSchema()
+    s.add_label("person")
+    s.labels["person"].properties["name"] = PropertyDef(name="name", type="string")
+    s.labels["person"].properties["age"] = PropertyDef(name="age", type="integer")
+    s.labels["person"].properties["status"] = PropertyDef(name="status", type="string")
+    s.add_label("software")
+    s.labels["software"].properties["name"] = PropertyDef(name="name", type="string")
+    s.labels["software"].properties["lang"] = PropertyDef(name="lang", type="string")
+    s.add_rel("knows", "person", "person", weight="float")
+    s.add_rel("created", "person", "software")
+    return s
