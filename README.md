@@ -11,8 +11,8 @@ Zero runtime dependencies. Python 3.13+. Graph-native API — no SQL vocabulary.
 uv sync --group dev
 
 # from PyPI (after a release tag)
-pip install cypherast
-# or: uv add cypherast
+uv add cypherast
+# or: uv pip install cypherast
 ```
 
 ## Quick start
@@ -195,7 +195,7 @@ Publisher account: [gsagar on PyPI](https://pypi.org/user/gsagar/)
 3. **Verify**
    - Actions → **Release** workflow green
    - Package shows under [pypi.org/user/gsagar/](https://pypi.org/user/gsagar/)
-   - `pip install cypherast==0.1.1`
+   - `uv add cypherast==0.1.1` (or `uv pip install cypherast==0.1.1`)
    - GitHub → Releases has notes + `dist/*` artifacts
 
 Dry-run build locally: `make dist` then `uvx twine check dist/*`.
