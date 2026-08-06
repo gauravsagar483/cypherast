@@ -1,5 +1,5 @@
 Feature: MatchAcceptance
-  Sample openCypher TCK-style scenarios for cypherglot parse-rate scoreboard.
+  Sample openCypher TCK-style scenarios for cypherast parse-rate scoreboard.
 
   Scenario: Match and return node
     When executing query:

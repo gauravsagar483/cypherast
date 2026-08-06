@@ -23,7 +23,7 @@ jobs:
       - name: Sync deps
         run: uv sync --group dev
       - name: Ruff
-        run: uv run ruff check cypherglot tests
+        run: uv run ruff check cypherast tests
 
   typecheck:
     name: Typecheck (mypy)
@@ -36,7 +36,7 @@ jobs:
       - name: Sync deps
         run: uv sync --group dev
       - name: Mypy (strict)
-        run: uv run mypy cypherglot
+        run: uv run mypy cypherast
 
   test:
     name: Tests + coverage
@@ -56,7 +56,7 @@ jobs:
       - name: Pytest + coverage
         run: >
           uv run pytest
-          --cov=cypherglot
+          --cov=cypherast
           --cov-report=term-missing:skip-covered
           --cov-report=xml:coverage.xml
           --cov-fail-under=60

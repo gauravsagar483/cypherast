@@ -1,5 +1,5 @@
 [project]
-name = "cypherglot"
+name = "cypherast"
 version = "0.1.0"
 description = "Cypher/GQL transpiler, rewriter, planner, and in-memory executor"
 readme = "README.md"
@@ -21,13 +21,13 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gauravsagar483/cypherglot"
-Repository = "https://github.com/gauravsagar483/cypherglot"
-Issues = "https://github.com/gauravsagar483/cypherglot/issues"
-"Release notes" = "https://github.com/gauravsagar483/cypherglot/releases"
+Homepage = "https://github.com/gauravsagar483/cypherast"
+Repository = "https://github.com/gauravsagar483/cypherast"
+Issues = "https://github.com/gauravsagar483/cypherast/issues"
+"Release notes" = "https://github.com/gauravsagar483/cypherast/releases"
 
 [project.scripts]
-cypherglot = "cypherglot.cli:main"
+cypherast = "cypherast.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -42,15 +42,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["cypherglot"]
+packages = ["cypherast"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
 
 [tool.coverage.run]
-source = ["cypherglot"]
-omit = ["cypherglot/cli.py"]
+source = ["cypherast"]
+omit = ["cypherast/cli.py"]
 
 [tool.coverage.report]
 show_missing = true
@@ -75,7 +75,7 @@ python_version = "3.13"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-packages = ["cypherglot"]
+packages = ["cypherast"]
 
 [dependency-groups]
 dev = [

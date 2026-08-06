@@ -2,8 +2,8 @@
 
 ## What this repo is
 
-**cypherglot** is a Cypher/GQL library (lexer → parser → AST → named rewrite rules → planner → in-memory executor).
-Python 3.13+, zero runtime dependencies, MIT. Public API lives in `cypherglot/__init__.py`.
+**cypherast** is a Cypher/GQL library (lexer → parser → AST → named rewrite rules → planner → in-memory executor).
+Python 3.13+, zero runtime dependencies, MIT. Public API lives in `cypherast/__init__.py`.
 
 This is a **graph query** toolchain. Use Cypher/GQL vocabulary (MATCH, pattern, binding, hop, dialect). Do not frame APIs or reviews in SQL terms.
 
@@ -32,13 +32,13 @@ Nits (non-blocking unless pervasive):
 
 | Path | Owns |
 |------|------|
-| `cypherglot/lexer.py`, `parser.py`, `ast.py` | Tokenize / parse / IR |
-| `cypherglot/dialects/` | Dialect registry, capabilities, constraint rewrites |
-| `cypherglot/rewriter/` | Individual AST rewrite passes |
-| `cypherglot/optimizer/` | Named `Rule` / `RuleSet`, catalogs, `only`/`disable` |
-| `cypherglot/planner/` | Explain / cost / plans |
-| `cypherglot/executor/` | In-memory `Graph` + execute |
-| `cypherglot/renderer.py` | AST → Cypher text |
+| `cypherast/lexer.py`, `parser.py`, `ast.py` | Tokenize / parse / IR |
+| `cypherast/dialects/` | Dialect registry, capabilities, constraint rewrites |
+| `cypherast/rewriter/` | Individual AST rewrite passes |
+| `cypherast/optimizer/` | Named `Rule` / `RuleSet`, catalogs, `only`/`disable` |
+| `cypherast/planner/` | Explain / cost / plans |
+| `cypherast/executor/` | In-memory `Graph` + execute |
+| `cypherast/renderer.py` | AST → Cypher text |
 | `tests/` | pytest; `tests/tck/` = sample parse-rate features only |
 
 Pipeline order: parse → (optional) optimize/constraints → render / plan / run.

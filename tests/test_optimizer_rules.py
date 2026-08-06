@@ -1,10 +1,10 @@
 """Named optimizer rules: only / disable."""
 
-import cypherglot
-from cypherglot.dialects.puppygraph import PuppyGraph
-from cypherglot.optimizer import OPTIONAL_RULES, RULES, RuleSet
-from cypherglot.optimizer import optimize as opt_optimize
-from cypherglot.optimizer.catalog import constraint_rules
+import cypherast
+from cypherast.dialects.puppygraph import PuppyGraph
+from cypherast.optimizer import OPTIONAL_RULES, RULES, RuleSet
+from cypherast.optimizer import optimize as opt_optimize
+from cypherast.optimizer.catalog import constraint_rules
 
 
 def test_rules_names():
@@ -19,7 +19,7 @@ def test_rules_names():
 
 
 def test_disable_qualify_keeps_anon():
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH () RETURN 1",
         write="opencypher",
         disable=["qualify"],
@@ -29,13 +29,13 @@ def test_disable_qualify_keeps_anon():
 
 
 def test_only_simplify():
-    tree = cypherglot.parse_one("RETURN 1 + 1")
+    tree = cypherast.parse_one("RETURN 1 + 1")
     out = opt_optimize(tree, only=["simplify"])
     assert out.cypher() == "RETURN 2" or "2" in out.cypher()
 
 
 def test_constraint_disable_ensure_row_limit():
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH (n:Person) RETURN n.name",
         write="puppygraph",
         constraint_disable=["ensure_row_limit"],
@@ -44,7 +44,7 @@ def test_constraint_disable_ensure_row_limit():
 
 
 def test_constraint_only_split_cartesian():
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH (a:Person), (b:Person) RETURN a, b LIMIT 10",
         write="puppygraph",
         only=[],  # skip canonicalizer
@@ -72,7 +72,7 @@ def test_puppygraph_constraint_rule_names():
 
 
 def test_opt_in_merge_match_chains():
-    tree = cypherglot.parse_one(
+    tree = cypherast.parse_one(
         "MATCH (a:Person) MATCH (a)-[:R]->(b:Person) RETURN a, b LIMIT 5"
     )
     # default RULES: no merge

@@ -1,4 +1,4 @@
-# How to Use AI with cypherglot
+# How to Use AI with cypherast
 
 Practical guide for contributing with AI coding assistants.
 
@@ -7,7 +7,7 @@ Practical guide for contributing with AI coding assistants.
 - Human owns the PR. Understand every line before merge.
 - Match existing graph-native style: Cypher terms, zero runtime deps, typed Python 3.13.
 - Read `AGENTS.md` and `.agents/rules/` before large changes.
-- Never invent dialect limits — open `cypherglot/dialects/capabilities.py` and `constraints.py`.
+- Never invent dialect limits — open `cypherast/dialects/capabilities.py` and `constraints.py`.
 
 ## Best workflow
 
@@ -30,12 +30,12 @@ make validate Q="MATCH (n) RETURN n" DIALECT=puppygraph
 ### Named optimizer rules
 
 ```python
-import cypherglot
-from cypherglot.optimizer import RULES, OPTIONAL_RULES
+import cypherast
+from cypherast.optimizer import RULES, OPTIONAL_RULES
 
-cypherglot.optimize(q, disable=["qualify"])
-cypherglot.optimize(q, write="puppygraph", constraint_disable=["ensure_row_limit"])
-cypherglot.optimize(q, rules=RULES + OPTIONAL_RULES)  # opt-in merge_match_chains
+cypherast.optimize(q, disable=["qualify"])
+cypherast.optimize(q, write="puppygraph", constraint_disable=["ensure_row_limit"])
+cypherast.optimize(q, rules=RULES + OPTIONAL_RULES)  # opt-in merge_match_chains
 ```
 
 ## What to watch

@@ -1,11 +1,11 @@
 ---
-description: Keep cypherglot graph-native — no SQL-clone framing or foreign brand names
+description: Keep cypherast graph-native — no SQL-clone framing or foreign brand names
 alwaysApply: true
 ---
 
 # Graph-native naming
 
-cypherglot is a **Cypher/GQL** library. Do not frame it as a SQL toolchain clone in code, comments, docs, tests, READMEs, commit messages, or user-facing copy. Do not cite third-party SQL library brand names.
+cypherast is a **Cypher/GQL** library. Do not frame it as a SQL toolchain clone in code, comments, docs, tests, READMEs, commit messages, or user-facing copy. Do not cite third-party SQL library brand names.
 
 ## Do
 

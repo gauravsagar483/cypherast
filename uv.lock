@@ -111,7 +111,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cypherglot"
+name = "cypherast"
 version = "0.1.0"
 source = { editable = "." }
 

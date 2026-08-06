@@ -1,4 +1,4 @@
-# cypherglot — quick uv workflows
+# cypherast — quick uv workflows
 #
 #   make help
 #   make sync test
@@ -8,7 +8,7 @@
 
 UV      ?= uv
 PYTHON  ?= $(UV) run python
-PKG     ?= cypherglot
+PKG     ?= cypherast
 READ    ?= puppygraph
 WRITE   ?= puppygraph
 DIALECT ?= $(WRITE)
@@ -90,21 +90,21 @@ optimize: ## Optimize for WRITE dialect  (Q= READ= WRITE= ONLY= DISABLE= CONSTRA
 	@test -n "$(Q)" || (echo 'usage: make optimize Q="..." WRITE=puppygraph'; exit 1)
 	Q="$(Q)" READ="$(READ)" WRITE="$(WRITE)" ONLY="$(ONLY)" DISABLE="$(DISABLE)" \
 	CONSTRAINT_ONLY="$(CONSTRAINT_ONLY)" CONSTRAINT_DISABLE="$(CONSTRAINT_DISABLE)" \
-	$(PYTHON) -c "import cypherglot,os; \
+	$(PYTHON) -c "import cypherast,os; \
 q=os.environ['Q']; r=os.environ['READ']; w=os.environ['WRITE']; \
 def csv(k): v=os.environ.get(k,'').strip(); return [x.strip() for x in v.split(',') if x.strip()] or None; \
-print(cypherglot.optimize(q, read=r, write=w, only=csv('ONLY'), disable=csv('DISABLE'), constraint_only=csv('CONSTRAINT_ONLY'), constraint_disable=csv('CONSTRAINT_DISABLE')).cypher(pretty=True, dialect=w))"
+print(cypherast.optimize(q, read=r, write=w, only=csv('ONLY'), disable=csv('DISABLE'), constraint_only=csv('CONSTRAINT_ONLY'), constraint_disable=csv('CONSTRAINT_DISABLE')).cypher(pretty=True, dialect=w))"
 
 validate: ## Validate against DIALECT caps  (Q= DIALECT=)
 	@test -n "$(Q)" || (echo 'usage: make validate Q="..." DIALECT=puppygraph'; exit 1)
-	Q="$(Q)" DIALECT="$(DIALECT)" READ="$(READ)" $(PYTHON) -c "import cypherglot,os; q=os.environ['Q']; d=os.environ['DIALECT']; r=os.environ.get('READ') or None; issues=cypherglot.validate(q, read=r, dialect=d); \
+	Q="$(Q)" DIALECT="$(DIALECT)" READ="$(READ)" $(PYTHON) -c "import cypherast,os; q=os.environ['Q']; d=os.environ['DIALECT']; r=os.environ.get('READ') or None; issues=cypherast.validate(q, read=r, dialect=d); \
 print('OK' if not issues else f'{len(issues)} issue(s)'); \
 [print(f'  [{i.code}] {i.message}' + (f' — {i.hint}' if i.hint else '')) for i in issues]; \
 raise SystemExit(1 if issues else 0)"
 
 translate: ## Translate FROM → TO  (Q= FROM= TO=); add OPT=1 to optimize for TO
 	@test -n "$(Q)" || (echo 'usage: make translate Q="..." FROM=opencypher TO=puppygraph'; exit 1)
-	Q="$(Q)" FROM="$(FROM)" TO="$(TO)" OPT="$(OPT)" $(PYTHON) -c "import cypherglot,os; q=os.environ['Q']; print(cypherglot.translate(q, from_=os.environ['FROM'], to_=os.environ['TO'], pretty=True, optimize=os.environ.get('OPT')=='1'))"
+	Q="$(Q)" FROM="$(FROM)" TO="$(TO)" OPT="$(OPT)" $(PYTHON) -c "import cypherast,os; q=os.environ['Q']; print(cypherast.translate(q, from_=os.environ['FROM'], to_=os.environ['TO'], pretty=True, optimize=os.environ.get('OPT')=='1'))"
 
 explain: ## EXPLAIN plan  (Q=)
 	@test -n "$(Q)" || (echo 'usage: make explain Q="..."'; exit 1)

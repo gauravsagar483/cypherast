@@ -1,5 +1,5 @@
 ---
-description: Pipeline layers and module boundaries for cypherglot
+description: Pipeline layers and module boundaries for cypherast
 alwaysApply: true
 ---
 
@@ -16,7 +16,7 @@ Pipeline order (do not skip layers or import backwards):
 
 ## Rules
 
-- Public surface stays in `cypherglot/__init__.py` (+ CLI). New user-facing entry points go there.
+- Public surface stays in `cypherast/__init__.py` (+ CLI). New user-facing entry points go there.
 - Dialect-specific engine limits belong in `DialectCapabilities` + `constraints.py` / `constraint_rules`, not hard-coded label/rel names from one customer graph.
 - Rewrite implementations live in `rewriter/`; registration/order/names live in `optimizer/catalog.py`.
 - Rendering goes through `Renderer` / `AstNode.cypher(...)` — keep dialect emit differences in dialect renderer subclasses when needed.

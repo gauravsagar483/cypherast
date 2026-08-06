@@ -1,6 +1,6 @@
 """Lexer tests."""
 
-from cypherglot.lexer import Lexer, TokenKind
+from cypherast.lexer import Lexer, TokenKind
 
 
 def test_keywords_and_idents():

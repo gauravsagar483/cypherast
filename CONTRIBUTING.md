@@ -1,4 +1,4 @@
-# Contributing to cypherglot
+# Contributing to cypherast
 
 ## Setup
 
@@ -19,7 +19,7 @@ Requires Python 3.13+ (`requires-python` in `pyproject.toml`).
 ## Code style
 
 - Ruff: line length 100, target `py313` (`pyproject.toml`).
-- Mypy: `strict = true` on the `cypherglot` package.
+- Mypy: `strict = true` on the `cypherast` package.
 - Zero runtime dependencies unless explicitly agreed.
 
 ## Tests

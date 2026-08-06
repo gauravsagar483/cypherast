@@ -1,5 +1,5 @@
 ---
-applyTo: ".github/workflows/**/*.yml,cypherglot/dialects/**/*.py,cypherglot/optimizer/**/*.py,cypherglot/rewriter/**/*.py"
+applyTo: ".github/workflows/**/*.yml,cypherast/dialects/**/*.py,cypherast/optimizer/**/*.py,cypherast/rewriter/**/*.py"
 ---
 
 # High-risk paths — Copilot code review

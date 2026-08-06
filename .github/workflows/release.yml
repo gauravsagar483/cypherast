@@ -43,9 +43,9 @@ jobs:
 
       - name: Quality gate
         run: |
-          uv run ruff check cypherglot tests
-          uv run mypy cypherglot
-          uv run pytest --cov=cypherglot --cov-fail-under=60 -q
+          uv run ruff check cypherast tests
+          uv run mypy cypherast
+          uv run pytest --cov=cypherast --cov-fail-under=60 -q
 
       - name: Build sdist + wheel
         run: uv build

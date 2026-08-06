@@ -1,7 +1,7 @@
 """Lightweight openCypher TCK runner + compliance scoreboard.
 
 Place official TCK ``.feature`` files under ``tests/tck/features/``
-(or set ``CYPHERGLOT_TCK_PATH``). This runner parses Gherkin scenarios
+(or set ``CYPHERAST_TCK_PATH``). This runner parses Gherkin scenarios
 with Given/When/Then steps for graph setup, query, and expected rows.
 """
 
@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from cypherglot.parser import Parser
+from cypherast.parser import Parser
 
 
 @dataclass
@@ -65,7 +65,7 @@ _DOCSTRING_BLOCK = re.compile(r'"""\s*\n(.*?)"""', re.S)
 
 
 def discover_features(root: Path | None = None) -> list[Path]:
-    env = os.environ.get("CYPHERGLOT_TCK_PATH")
+    env = os.environ.get("CYPHERAST_TCK_PATH")
     base = Path(env) if env else (root or Path(__file__).parent / "features")
     if not base.exists():
         return []

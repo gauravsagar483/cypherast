@@ -1,4 +1,4 @@
-# cypherglot — agent instructions
+# cypherast — agent instructions
 
 Cypher/GQL library: lexer → parser → AST → named rewrite rules → planner → in-memory executor.
 Zero runtime deps. Python **3.13+**. Package version **0.1.0** (`pyproject.toml`). MIT.
@@ -11,9 +11,9 @@ Canonical AI instructions live here. Topic rules live under `.agents/rules/` onl
 - Never frame the library as a SQL toolchain clone — see `.agents/rules/graph-native-naming.md`.
 - Prefer `AstNode.cypher(...)` for render; public params use `cypher=`, not SQL-shaped names.
 - Do not add runtime dependencies without an explicit request.
-- Do not invent dialect capability limits — read `DialectCapabilities` / `cypherglot/dialects/constraints.py`.
+- Do not invent dialect capability limits — read `DialectCapabilities` / `cypherast/dialects/constraints.py`.
 - Do not hard-code customer-specific graph labels/rel types into dialect code.
-## Public API (`cypherglot/__init__.py`)
+## Public API (`cypherast/__init__.py`)
 
 | Function | Role |
 |----------|------|
@@ -24,12 +24,12 @@ Canonical AI instructions live here. Topic rules live under `.agents/rules/` onl
 | `explain` / `profile` / `run` | Plan / profile / execute on in-memory `Graph` |
 | `lineage` | Binding provenance |
 
-CLI entry: `cypherglot.cli:main` (`uv run cypherglot …`).
+CLI entry: `cypherast.cli:main` (`uv run cypherast …`).
 
 ## Dialects
 
-Registered under `cypherglot/dialects/`: `opencypher`, `neo4j`, `memgraph`, `puppygraph`.
-`Dialect.optimize` runs `cypherglot.optimizer` `RULES` then `constraint_rules(capabilities)`.
+Registered under `cypherast/dialects/`: `opencypher`, `neo4j`, `memgraph`, `puppygraph`.
+`Dialect.optimize` runs `cypherast.optimizer` `RULES` then `constraint_rules(capabilities)`.
 PuppyGraph caps are generic engine limits (LIMIT, no Cartesian multi-path MATCH, etc.) — keep dialect code free of domain-specific label/rel names.
 
 ## Optimizer rules
@@ -61,7 +61,7 @@ Copilot: `.github/copilot-instructions.md` (+ `.github/instructions/*.instructio
 Single Python package (uv + hatchling):
 
 ```text
-cypherglot/
+cypherast/
 ├── AGENTS.md                 # this file (canonical AI instructions)
 ├── HOWTOAI.md
 ├── CONTRIBUTING.md
@@ -80,7 +80,7 @@ cypherglot/
 │       ├── ci.yml            # lint + mypy + pytest/coverage
 │       └── release.yml       # tag v* → PyPI + GitHub Release
 ├── docs/api.md
-├── cypherglot/
+├── cypherast/
 │   ├── __init__.py           # public API
 │   ├── ast.py
 │   ├── lexer.py

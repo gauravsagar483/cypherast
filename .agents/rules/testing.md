@@ -1,5 +1,5 @@
 ---
-description: Pytest conventions for cypherglot
+description: Pytest conventions for cypherast
 globs: tests/**/*.py
 alwaysApply: false
 ---
@@ -8,7 +8,7 @@ alwaysApply: false
 
 - Framework: **pytest** (`tests/`, `testpaths` in `pyproject.toml`).
 - Name files `tests/test_*.py`. Prefer focused cases over giant fixtures.
-- Public API tests go through `import cypherglot` (`parse_one`, `optimize`, `translate`, `validate`).
+- Public API tests go through `import cypherast` (`parse_one`, `optimize`, `translate`, `validate`).
 - Dialect capability tests: `tests/test_puppygraph_dialect.py`.
 - Named rule filters: `tests/test_optimizer_rules.py`.
 - Parser/hardening: `tests/test_parse.py`, `tests/test_hardening.py`.

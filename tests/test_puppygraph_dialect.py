@@ -1,7 +1,7 @@
 """PuppyGraph dialect capabilities: optimize + translate to/from."""
 
-import cypherglot
-from cypherglot.dialects.puppygraph import PuppyGraph
+import cypherast
+from cypherast.dialects.puppygraph import PuppyGraph
 
 
 def test_capabilities_flags():
@@ -18,7 +18,7 @@ def test_capabilities_flags():
 
 
 def test_optimize_injects_limit():
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH (n:Person) RETURN n.name",
         read="opencypher",
         write="puppygraph",
@@ -28,7 +28,7 @@ def test_optimize_injects_limit():
 
 
 def test_optimize_pure_aggregate_may_omit_limit():
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH (n:Person) RETURN count(n) AS c",
         write="puppygraph",
     ).cypher(dialect="puppygraph")
@@ -37,7 +37,7 @@ def test_optimize_pure_aggregate_may_omit_limit():
 
 
 def test_optimize_splits_cartesian_match():
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH (a:Person), (b:Person) RETURN a, b LIMIT 10",
         write="puppygraph",
     ).cypher(dialect="puppygraph")
@@ -47,7 +47,7 @@ def test_optimize_splits_cartesian_match():
 
 
 def test_optimize_caps_collect_distinct():
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH (a:Person)-[:R]->(b:Item) "
         "RETURN collect(DISTINCT a.name) AS as_, collect(DISTINCT b.name) AS bs LIMIT 10",
         write="puppygraph",
@@ -58,7 +58,7 @@ def test_optimize_caps_collect_distinct():
 
 
 def test_optimize_drops_distinct_with_agg():
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH (a:Person)-[:R]->(b:Item) "
         "RETURN DISTINCT a.name AS n, count(b) AS c LIMIT 10",
         write="puppygraph",
@@ -69,7 +69,7 @@ def test_optimize_drops_distinct_with_agg():
 
 
 def test_pattern_predicate_no_exists_on_puppygraph():
-    out = cypherglot.translate(
+    out = cypherast.translate(
         "MATCH (n:Person) WHERE NOT (n)-[:R]->(:Item) RETURN n LIMIT 10",
         from_="opencypher",
         to_="puppygraph",
@@ -81,19 +81,19 @@ def test_pattern_predicate_no_exists_on_puppygraph():
 
 def test_translate_to_and_from_puppygraph():
     q = "MATCH (a:Person)-[:KNOWS*1..3]->(b:Person) WHERE a.status = 'ACTIVE' RETURN a.name LIMIT 20"
-    to_pg = cypherglot.translate(q, from_="opencypher", to_="puppygraph", optimize=True)
+    to_pg = cypherast.translate(q, from_="opencypher", to_="puppygraph", optimize=True)
     assert "ACTIVE" in to_pg or "{status" in to_pg.replace(" ", "")
     assert "LIMIT" in to_pg.upper()
 
-    back = cypherglot.translate(to_pg, from_="puppygraph", to_="opencypher", optimize=True)
+    back = cypherast.translate(to_pg, from_="puppygraph", to_="opencypher", optimize=True)
     assert "MATCH" in back
     # round-trip parseable
-    cypherglot.parse_one(back, read="opencypher")
-    cypherglot.parse_one(to_pg, read="puppygraph")
+    cypherast.parse_one(back, read="opencypher")
+    cypherast.parse_one(to_pg, read="puppygraph")
 
 
 def test_validate_list_comprehension():
-    issues = cypherglot.validate(
+    issues = cypherast.validate(
         "MATCH (n:Person) RETURN [x IN [1,2] | x] AS xs LIMIT 5",
         dialect="puppygraph",
     )
@@ -101,7 +101,7 @@ def test_validate_list_comprehension():
 
 
 def test_validate_unlabelled_match():
-    issues = cypherglot.validate(
+    issues = cypherast.validate(
         "MATCH (n) RETURN n LIMIT 5",
         dialect="puppygraph",
     )
@@ -110,7 +110,7 @@ def test_validate_unlabelled_match():
 
 def test_optimize_opencypher_unchanged_caps():
     # openCypher write should not force LIMIT
-    out = cypherglot.optimize(
+    out = cypherast.optimize(
         "MATCH (n:Person) RETURN n.name",
         write="opencypher",
     ).cypher()

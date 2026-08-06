@@ -1,4 +1,4 @@
-# cypherglot
+# cypherast
 
 Cypher/GQL transpiler, rewriter, cost-based planner, and in-memory executor.
 
@@ -11,24 +11,24 @@ Zero runtime dependencies. Python 3.13+. Graph-native API — no SQL vocabulary.
 uv sync --group dev
 
 # from PyPI (after a release tag)
-pip install cypherglot
-# or: uv add cypherglot
+pip install cypherast
+# or: uv add cypherast
 ```
 
 ## Quick start
 
 ```python
-import cypherglot
+import cypherast
 
 q = "MATCH (n:Person) WHERE n.age > 30 RETURN n.name"
-tree = cypherglot.parse_one(q)
+tree = cypherast.parse_one(q)
 print(tree.cypher(pretty=True))
 
-print(cypherglot.optimize(q).cypher(pretty=True))
+print(cypherast.optimize(q).cypher(pretty=True))
 
-print(cypherglot.translate(q, from_="opencypher", to_="neo4j", pretty=True))
+print(cypherast.translate(q, from_="opencypher", to_="neo4j", pretty=True))
 # alias:
-print(cypherglot.transpile(q, from_="opencypher", to_="memgraph"))
+print(cypherast.transpile(q, from_="opencypher", to_="memgraph"))
 ```
 
 ## Public API
@@ -47,7 +47,7 @@ Full samples: [docs/api.md](docs/api.md).
 ### parse / parse_one
 
 ```python
-tree = cypherglot.parse_one(
+tree = cypherast.parse_one(
     "MATCH (a:Person)-[:KNOWS]->(b) RETURN a.name, b.name",
     read="opencypher",  # or neo4j / memgraph
 )
@@ -57,7 +57,7 @@ print(tree.cypher())
 ### translate (transpile)
 
 ```python
-out = cypherglot.translate(
+out = cypherast.translate(
     "MATCH (n:Person) RETURN n",
     from_="opencypher",
     to_="neo4j",
@@ -72,31 +72,31 @@ Folds `WHERE n.x = lit` into `(n {x: lit})`, simplifies expressions. Rules are n
 and toggleable:
 
 ```python
-from cypherglot.optimizer import RULES, OPTIONAL_RULES
+from cypherast.optimizer import RULES, OPTIONAL_RULES
 
 print(
-    cypherglot.optimize(
+    cypherast.optimize(
         "MATCH (n:Person) WHERE n.status = 'ACTIVE' RETURN n"
     ).cypher(pretty=True)
 )
 # MATCH (n:Person {status: 'ACTIVE'}) RETURN n
 
 # disable / only
-cypherglot.optimize(q, disable=["qualify", "annotate_types"])
-cypherglot.optimize(q, write="puppygraph", constraint_disable=["ensure_row_limit"])
-cypherglot.optimize(q, rules=RULES + OPTIONAL_RULES)  # opt-in merge_match_chains
+cypherast.optimize(q, disable=["qualify", "annotate_types"])
+cypherast.optimize(q, write="puppygraph", constraint_disable=["ensure_row_limit"])
+cypherast.optimize(q, rules=RULES + OPTIONAL_RULES)  # opt-in merge_match_chains
 ```
 
 ### explain / profile / run
 
 ```python
-from cypherglot.executor import Graph
+from cypherast.executor import Graph
 
-print(cypherglot.explain("MATCH (n:Person)-[:KNOWS]->(m) RETURN n, m"))
+print(cypherast.explain("MATCH (n:Person)-[:KNOWS]->(m) RETURN n, m"))
 
 g = Graph()
 g.create_node(["Person"], {"name": "Ada", "age": 36})
-rows = cypherglot.run(
+rows = cypherast.run(
     "MATCH (n:Person) WHERE n.age > 30 RETURN n.name",
     graph=g,
 )
@@ -106,7 +106,7 @@ print(list(rows))
 ### lineage
 
 ```python
-root = cypherglot.lineage(
+root = cypherast.lineage(
     "MATCH (n:Person) RETURN n.name AS name",
     binding="name",
 )
@@ -116,11 +116,11 @@ print(root)  # provenance Node; .to_html() for vis.js
 ## CLI
 
 ```bash
-uv run cypherglot parse "MATCH (n) RETURN n"
-uv run cypherglot translate "MATCH (n) RETURN n" -r opencypher -w neo4j --pretty
-uv run cypherglot optimize "MATCH (n:Person) WHERE n.x = 1 RETURN n"
-uv run cypherglot explain "MATCH (a)-[:R]->(b) RETURN a"
-uv run cypherglot run "CREATE (n:Person {name: 'Ada'}) RETURN n"
+uv run cypherast parse "MATCH (n) RETURN n"
+uv run cypherast translate "MATCH (n) RETURN n" -r opencypher -w neo4j --pretty
+uv run cypherast optimize "MATCH (n:Person) WHERE n.x = 1 RETURN n"
+uv run cypherast explain "MATCH (a)-[:R]->(b) RETURN a"
+uv run cypherast run "CREATE (n:Person {name: 'Ada'}) RETURN n"
 ```
 
 Or via Make:
@@ -144,9 +144,9 @@ make translate Q="MATCH (n:Person) RETURN n" FROM=opencypher TO=puppygraph OPT=1
 (LIMIT, labelled MATCH, bounded hops, no Cartesian multi-path MATCH, etc.).
 
 ```python
-cypherglot.optimize(q, write="puppygraph").cypher(dialect="puppygraph")
-cypherglot.translate(q, from_="opencypher", to_="puppygraph", optimize=True)
-cypherglot.validate(q, dialect="puppygraph")
+cypherast.optimize(q, write="puppygraph").cypher(dialect="puppygraph")
+cypherast.translate(q, from_="opencypher", to_="puppygraph", optimize=True)
+cypherast.validate(q, dialect="puppygraph")
 ```
 
 ## TCK scoreboard
@@ -176,9 +176,9 @@ Publisher account: [gsagar on PyPI](https://pypi.org/user/gsagar/)
 1. **One-time setup (trusted publishing — no API token in GitHub secrets)**
    - Log in as **gsagar** on [pypi.org](https://pypi.org).
    - Until the project exists: [Publishing settings → pending publisher](https://pypi.org/manage/account/publishing/) (or after first upload: project → **Publishing**):
-     - PyPI project name: `cypherglot`
+     - PyPI project name: `cypherast`
      - Owner: your GitHub user/org (same account that owns the repo)
-     - Repository: `cypherglot`
+     - Repository: `cypherast`
      - Workflow name: `release.yml`
      - Environment name: `pypi`
    - GitHub repo → **Settings → Environments → New environment** named `pypi` (optional required reviewers).
@@ -195,7 +195,7 @@ Publisher account: [gsagar on PyPI](https://pypi.org/user/gsagar/)
 3. **Verify**
    - Actions → **Release** workflow green
    - Package shows under [pypi.org/user/gsagar/](https://pypi.org/user/gsagar/)
-   - `pip install cypherglot==0.1.1`
+   - `pip install cypherast==0.1.1`
    - GitHub → Releases has notes + `dist/*` artifacts
 
 Dry-run build locally: `make dist` then `uvx twine check dist/*`.

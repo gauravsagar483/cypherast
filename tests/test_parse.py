@@ -1,6 +1,6 @@
 """Parse / render roundtrip tests."""
 
-import cypherglot
+import cypherast
 
 QUERIES = [
     "MATCH (n) RETURN n",
@@ -23,7 +23,7 @@ QUERIES = [
 
 def test_parse_smoke():
     for q in QUERIES:
-        tree = cypherglot.parse_one(q)
+        tree = cypherast.parse_one(q)
         assert tree is not None
         rendered = tree.cypher()
         assert isinstance(rendered, str)
@@ -32,25 +32,25 @@ def test_parse_smoke():
 
 def test_roundtrip_basic():
     q = "MATCH (n:Person) WHERE n.age > 30 RETURN n.name"
-    tree = cypherglot.parse_one(q)
+    tree = cypherast.parse_one(q)
     out = tree.cypher()
-    tree2 = cypherglot.parse_one(out)
+    tree2 = cypherast.parse_one(out)
     assert tree2.cypher() == out
 
 
 def test_translate_identity():
     q = "MATCH (n) RETURN n"
-    assert "MATCH" in cypherglot.translate(q, from_="opencypher", to_="neo4j")
+    assert "MATCH" in cypherast.translate(q, from_="opencypher", to_="neo4j")
 
 
 def test_puppygraph_inherits_opencypher():
-    from cypherglot.dialects.opencypher import OpenCypher
-    from cypherglot.dialects.puppygraph import PuppyGraph, PuppyGraphRenderer
+    from cypherast.dialects.opencypher import OpenCypher
+    from cypherast.dialects.puppygraph import PuppyGraph, PuppyGraphRenderer
 
     assert issubclass(PuppyGraph, OpenCypher)
-    assert "puppygraph" in cypherglot.dialect_names()
+    assert "puppygraph" in cypherast.dialect_names()
     q = "MATCH (n:Person)-[:KNOWS]->(m) RETURN n.name"
-    out = cypherglot.translate(q, from_="opencypher", to_="puppygraph", pretty=True)
+    out = cypherast.translate(q, from_="opencypher", to_="puppygraph", pretty=True)
     assert "MATCH" in out
     assert PuppyGraph.renderer().dialect_name == "puppygraph"
     assert isinstance(PuppyGraph.renderer(), PuppyGraphRenderer)
@@ -58,5 +58,5 @@ def test_puppygraph_inherits_opencypher():
 
 def test_pretty():
     q = "MATCH (n) WHERE n.x = 1 RETURN n"
-    out = cypherglot.translate(q, pretty=True)
+    out = cypherast.translate(q, pretty=True)
     assert "\n" in out or "WHERE" in out
