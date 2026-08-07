@@ -7,7 +7,7 @@ uv sync --group dev
 make check
 ```
 
-Requires Python 3.13+ (`requires-python` in `pyproject.toml`).
+Requires Python 3.11+ (`requires-python` in `pyproject.toml`).
 
 ## Workflow
 

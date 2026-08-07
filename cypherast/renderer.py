@@ -128,7 +128,11 @@ class Renderer:
 
     def render_Ordered(self, node: a.Ordered) -> str:
         s = self.dispatch(node.this)
-        return f"{s} DESC" if node.desc else s
+        if node.desc:
+            s = f"{s} DESC"
+        if node.nulls:
+            s = f"{s} NULLS {node.nulls}"
+        return s
 
     def render_Skip(self, node: a.Skip) -> str:
         return f"SKIP {self.dispatch(node.this)}"

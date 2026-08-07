@@ -51,7 +51,7 @@ def optimize(
         optimize(tree, disable=["qualify", "annotate_types"])
         optimize(tree, only=["simplify", "pushdown_predicates"])
         optimize(tree, rules=RULES + OPTIONAL_RULES)
-        optimize(tree, constraints=constraint_rules(caps), constraint_disable=["ensure_row_limit"])
+        optimize(tree, constraints=constraint_rules(caps), constraint_disable=["strip_nulls_order_modifiers"])
     """
     canon = resolve_rules(RULES, rules=rules, only=only, disable=disable)
     node = canon.apply(tree, copy=copy, schema=schema, **kwargs)

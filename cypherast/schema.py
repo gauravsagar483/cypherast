@@ -1,4 +1,9 @@
-"""Optional graph schema + function signature registry."""
+"""Optional graph schema + function signature registry.
+
+Callers pass ``GraphSchema`` into ``optimize`` / ``validate`` (same role as a
+relational column catalog for SQL optimizers — graph labels, rel types,
+properties, and id-field markers).
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,8 @@ class PropertyDef:
     name: str
     type: str
     mandatory: bool = False
+    # True → not a queryable map property; use id()/elementId() instead
+    id_field: bool = False
 
 
 @dataclass
@@ -34,21 +41,128 @@ class IndexDef:
 
 @dataclass
 class GraphSchema:
+    """In-memory graph catalog: labels, rel types, properties, optional stats.
+
+    When passed to ``optimize`` / ``validate``:
+    - undeclared properties on known labels are rejected (if ``strict``)
+    - ``id_field`` properties are rejected (use ``id(n)`` / ``elementId(n)``)
+    - unknown labels are ignored (no invented domain vocabulary)
+    """
+
     labels: dict[str, LabelDef] = field(default_factory=dict)
     rel_types: dict[str, RelTypeDef] = field(default_factory=dict)
     indexes: list[IndexDef] = field(default_factory=list)
     stats: dict[str, float] = field(default_factory=dict)  # cardinality hints
+    # When True, property access on a known label must be declared (or id_field).
+    # Default False: without a catalog intent, undeclared props are not blocked.
+    strict: bool = False
 
-    def add_label(self, name: str, **props: str) -> None:
-        ld = self.labels.setdefault(name, LabelDef(name=name))
+    def add_label(self, label: str, **props: str) -> None:
+        """Register label; kwargs are ``prop_name=type`` (not id fields)."""
+        ld = self.labels.setdefault(label, LabelDef(name=label))
         for k, typ in props.items():
             ld.properties[k] = PropertyDef(name=k, type=typ)
+
+    def add_id_field(self, label: str, prop: str, typ: str = "string") -> None:
+        """Mark ``label.prop`` as vertex id storage — not queryable via ``n.prop``."""
+        ld = self.labels.setdefault(label, LabelDef(name=label))
+        ld.properties[prop] = PropertyDef(name=prop, type=typ, id_field=True)
+
+    def add_rel_id_field(self, rel_type: str, prop: str, typ: str = "string") -> None:
+        """Mark ``rel_type.prop`` as edge id storage — not queryable via ``r.prop``."""
+        rd = self.rel_types.setdefault(rel_type, RelTypeDef(name=rel_type))
+        rd.properties[prop] = PropertyDef(name=prop, type=typ, id_field=True)
 
     def add_rel(self, name: str, start: str, end: str, **props: str) -> None:
         rd = self.rel_types.setdefault(name, RelTypeDef(name=name))
         rd.endpoints.append((start, end))
         for k, typ in props.items():
             rd.properties[k] = PropertyDef(name=k, type=typ)
+
+    def has_label(self, name: str) -> bool:
+        return self._find_label(name) is not None
+
+    def has_rel(self, name: str) -> bool:
+        return self._find_rel(name) is not None
+
+    def property_names(self, label: str, *, include_id_fields: bool = False) -> list[str]:
+        ld = self._find_label(label)
+        if ld is None:
+            return []
+        return [
+            p.name
+            for p in ld.properties.values()
+            if include_id_fields or not p.id_field
+        ]
+
+    def has_property(self, label: str, prop: str) -> bool:
+        pd = self.get_property(label, prop)
+        return pd is not None and not pd.id_field
+
+    def is_id_property(self, label: str, prop: str) -> bool:
+        pd = self.get_property(label, prop)
+        return pd is not None and pd.id_field
+
+    def get_property(self, label: str, prop: str) -> PropertyDef | None:
+        ld = self._find_label(label)
+        if ld is None:
+            return None
+        if prop in ld.properties:
+            return ld.properties[prop]
+        for k, v in ld.properties.items():
+            if k.lower() == prop.lower():
+                return v
+        return None
+
+    def has_rel_property(self, rel_type: str, prop: str) -> bool:
+        pd = self.get_rel_property(rel_type, prop)
+        return pd is not None and not pd.id_field
+
+    def is_rel_id_property(self, rel_type: str, prop: str) -> bool:
+        pd = self.get_rel_property(rel_type, prop)
+        return pd is not None and pd.id_field
+
+    def get_rel_property(self, rel_type: str, prop: str) -> PropertyDef | None:
+        rd = self._find_rel(rel_type)
+        if rd is None:
+            return None
+        if prop in rd.properties:
+            return rd.properties[prop]
+        for k, v in rd.properties.items():
+            if k.lower() == prop.lower():
+                return v
+        return None
+
+    def get_property_type(self, label: str, prop: str) -> str | None:
+        pd = self.get_property(label, prop)
+        return pd.type if pd and not pd.id_field else None
+
+    def _find_label(self, name: str) -> LabelDef | None:
+        if name in self.labels:
+            return self.labels[name]
+        for k, v in self.labels.items():
+            if k.lower() == name.lower():
+                return v
+        return None
+
+    def _find_rel(self, name: str) -> RelTypeDef | None:
+        if name in self.rel_types:
+            return self.rel_types[name]
+        for k, v in self.rel_types.items():
+            if k.lower() == name.lower():
+                return v
+        return None
+
+
+def ensure_schema(schema: object | None) -> GraphSchema | None:
+    """Normalize caller schema input to ``GraphSchema`` or ``None``."""
+    if schema is None:
+        return None
+    if isinstance(schema, GraphSchema):
+        return schema
+    raise TypeError(
+        f"schema must be GraphSchema or None, got {type(schema).__name__}"
+    )
 
 
 # Built-in Cypher function signatures: name -> (arg_types, return_type)
@@ -111,7 +225,7 @@ def modern_graph_schema() -> GraphSchema:
     Used as PuppyGraph's default when callers omit ``schema=`` so
     ``()-[e:knows]->()`` can be auto-labelled during optimize.
     """
-    s = GraphSchema()
+    s = GraphSchema(strict=False)  # tutorial default: don't reject unknown labels/props
     s.add_label("person")
     s.labels["person"].properties["name"] = PropertyDef(name="name", type="string")
     s.labels["person"].properties["age"] = PropertyDef(name="age", type="integer")

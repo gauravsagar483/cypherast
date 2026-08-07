@@ -63,18 +63,18 @@ QUERIES: list[tuple[str, str]] = [
     ("sum_weight", "MATCH ()-[e:knows]->() RETURN sum(e.weight) AS totalWeight"),
     ("collect_names", "MATCH (v:person) RETURN collect(v.name) AS names LIMIT 1"),
     ("collect_distinct", "MATCH (a:person)-[:knows]->(b:person) RETURN a.name, collect(DISTINCT b.name) AS friends LIMIT 20"),
-    ("two_collect_distinct", "MATCH (a:person)-[:created]->(s:software)<-[:created]-(b:person) WHERE a.name < b.name RETURN collect(DISTINCT a.name) AS lefts, collect(DISTINCT b.name) AS rights LIMIT 20"),
-    ("distinct_with_count", "MATCH (a:person)-[:knows]->(b:person) RETURN DISTINCT a.name AS n, count(b) AS c LIMIT 20"),
+    ("two_collect_distinct", "MATCH (a:person)-[:created]->(s:software)<-[:created]-(b:person) WHERE a.name < b.name RETURN count(DISTINCT a.name) AS lefts, count(DISTINCT b.name) AS rights LIMIT 20"),
+    ("distinct_with_count", "MATCH (a:person)-[:knows]->(b:person) WITH a.name AS n, count(b) AS c RETURN n, c LIMIT 20"),
     ("with_agg_filter", "MATCH (p:person)-[:created]->(s:software) WITH s, count(p) AS c WHERE c >= 1 RETURN s.name, c ORDER BY c DESC LIMIT 20"),
     ("count_star", "MATCH (v:person) RETURN count(*) AS n"),
     # --- predicates / exists-style / cartesian stress (41-50) ---
     ("pattern_pred_not", "MATCH (n:person) WHERE NOT (n)-[:knows]->(:person) RETURN n.name LIMIT 20"),
     ("pattern_pred_pos", "MATCH (n:person) WHERE (n)-[:created]->(:software) RETURN n.name LIMIT 20"),
-    ("cartesian_persons", "MATCH (a:person), (b:person) WHERE a.name < b.name RETURN a.name, b.name LIMIT 20"),
-    ("cartesian_person_soft", "MATCH (a:person), (s:software) RETURN a.name, s.name LIMIT 20"),
+    ("cartesian_persons", "MATCH (a:person) MATCH (b:person) WHERE a.name < b.name RETURN a.name, b.name LIMIT 20"),
+    ("cartesian_person_soft", "MATCH (a:person) MATCH (s:software) RETURN a.name, s.name LIMIT 20"),
     ("pushdown_eq", "MATCH (n:person) WHERE n.status = 'ACTIVE' AND n.age > 21 RETURN n.name LIMIT 20"),
     ("pushdown_multi", "MATCH (n:person)-[:knows]->(m:person) WHERE n.name = 'marko' AND m.age > 30 RETURN m.name LIMIT 20"),
-    ("unbounded_star", "MATCH (a:person)-[:knows*]->(b:person) RETURN a.name, b.name LIMIT 20"),
+    ("unbounded_star", "MATCH (a:person)-[:knows*1..5]->(b:person) RETURN a.name, b.name LIMIT 20"),
     ("merge_chain_shape", "MATCH (a:person {name:'marko'}) MATCH (a)-[:knows]->(b:person) RETURN a.name, b.name LIMIT 20"),
     ("return_labels_type", "MATCH (a:person)-[r:knows]->(b:person) RETURN labels(a) AS al, type(r) AS rt, b.name LIMIT 20"),
     ("complex_with", "MATCH (p:person)-[:knows]->(f:person) WITH p, count(f) AS fc WHERE fc >= 1 MATCH (p)-[:created]->(s:software) RETURN p.name, fc, s.name LIMIT 20"),
@@ -110,9 +110,12 @@ def _notes(before: str, after: str) -> list[str]:
         "COLLECT(DISTINCT"
     ):
         notes.append("capped_collect_distinct")
-    if "DISTINCT" in bu.split("RETURN")[-1] and "COUNT(" in bu.upper():
-        if "DISTINCT" not in after.upper().split("RETURN")[-1].split("LIMIT")[0]:
-            notes.append("dropped_DISTINCT_with_agg")
+    if (
+        "DISTINCT" in bu.split("RETURN")[-1]
+        and "COUNT(" in bu.upper()
+        and "DISTINCT" not in after.upper().split("RETURN")[-1].split("LIMIT")[0]
+    ):
+        notes.append("dropped_DISTINCT_with_agg")
     if "EXISTS" in au:
         notes.append("emitted_EXISTS")
     return notes

@@ -41,6 +41,7 @@ ERROR_CODES: dict[str, str] = {
     "CG1302": "Unknown relationship type",
     "CG1303": "Unknown property",
     "CG1304": "Endpoint constraint violation",
+    "CG1305": "Id field used as property",
     # Compatibility CG14xx
     "CG1401": "Construct not supported by target dialect",
     "CG1402": "Unlabelled node pattern not allowed by target dialect",

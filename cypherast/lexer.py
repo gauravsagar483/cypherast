@@ -112,6 +112,7 @@ class TokenKind(Enum):
     FILTER = auto()
     LET = auto()
     FOR = auto()
+    # NULLS / FIRST / LAST are not global keywords (Neo4j); parsed contextually in ORDER BY
 
 
 KEYWORDS: dict[str, TokenKind] = {

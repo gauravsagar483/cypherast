@@ -8,9 +8,10 @@ When reviewing changes under dialects, optimizer, rewriter, or CI workflows:
 
 ## Dialects / constraints
 
-- Confirm capability flags match rewrite behavior (`require_limit_on_row_return`, `allow_cartesian_match_paths`, var-length bounds).
-- Do not reintroduce default MATCH-chain merge or `exists()` emit for PuppyGraph unless capabilities explicitly allow it.
+- Confirm capability flags match rewrite behavior (`allow_cartesian_match_paths`, var-length bounds, FET-45 rewrite flags).
+- Do not reintroduce default MATCH-chain merge, `exists()` emit, LIMIT injection, or hop-cap silent rewrite for PuppyGraph unless capabilities explicitly allow it and docs/tests are updated.
 - Unbounded `*` var-length must remain allowed when `allow_unbounded_var_length=True` and `max_var_length_hops is None`.
+- `optimize` default `strict=True` is intentional — do not flip without an API note.
 
 ## Optimizer / rewriter
 

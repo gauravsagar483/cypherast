@@ -458,7 +458,7 @@ class Order(AstNode):
 
 
 class Ordered(AstNode):
-    arg_types = {"this": True, "desc": False}
+    arg_types = {"this": True, "desc": False, "nulls": False}  # "FIRST" | "LAST"
 
 
 class Skip(AstNode):

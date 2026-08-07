@@ -1,7 +1,7 @@
 # cypherast — agent instructions
 
 Cypher/GQL library: lexer → parser → AST → named rewrite rules → planner → in-memory executor.
-Zero runtime deps. Python **3.13+**. Package version **0.1.0** (`pyproject.toml`). MIT.
+Zero runtime deps. Python **3.11+**. Package version **0.1.2** (`pyproject.toml`). MIT.
 
 Canonical AI instructions live here. Topic rules live under `.agents/rules/` only (no tool-specific stub/rule trees in-repo).
 
@@ -18,9 +18,9 @@ Canonical AI instructions live here. Topic rules live under `.agents/rules/` onl
 | Function | Role |
 |----------|------|
 | `parse` / `parse_one` | Cypher → AST (`read=` dialect) |
-| `optimize` | Canonicalizer + optional write-dialect constraints (`only` / `disable` / `constraint_*`) |
-| `translate` / `transpile` | Parse `from_` → render `to_`; `optimize=` applies target constraints |
-| `validate` | List capability `ConstraintIssue`s for a dialect |
+| `optimize` | Canonicalizer + write-dialect constraints; **raises** on remaining issues by default (`strict=True`) |
+| `translate` / `transpile` | Parse `from_` → render `to_`; `optimize=True` applies target constraints + validate |
+| `validate` | List capability / schema `ConstraintIssue`s (`schema=` optional) |
 | `explain` / `profile` / `run` | Plan / profile / execute on in-memory `Graph` |
 | `lineage` | Binding provenance |
 
@@ -29,14 +29,14 @@ CLI entry: `cypherast.cli:main` (`uv run cypherast …`).
 ## Dialects
 
 Registered under `cypherast/dialects/`: `opencypher`, `neo4j`, `memgraph`, `puppygraph`.
-`Dialect.optimize` runs `cypherast.optimizer` `RULES` then `constraint_rules(capabilities)`.
-PuppyGraph caps are generic engine limits (LIMIT, no Cartesian multi-path MATCH, etc.) — keep dialect code free of domain-specific label/rel names.
+`Dialect.optimize` runs `cypherast.optimizer` `RULES` then `constraint_rules(capabilities)`, then raises if `strict` (default).
+PuppyGraph caps are generic engine limits (labelled MATCH, no Cartesian multi-path MATCH, FET-45 CASE guard, etc.) — keep dialect code free of domain-specific label/rel names. Hop caps and missing `LIMIT` are non-goals (query_guard / caller).
 
 ## Optimizer rules
 
 - Default `RULES`: `qualify` → `canonicalize_patterns` → `simplify` → `pushdown_predicates` → `annotate_types`
 - Opt-in: `OPTIONAL_RULES` (`merge_match_chains`) — not default (Cartesian risk on some engines)
-- Constraints built by `constraint_rules(caps)` — e.g. `ensure_row_limit`, `split_multi_path_match`
+- Constraints built by `constraint_rules(caps)` — e.g. `ensure_labelled_nodes`, `guard_optional_scalar_use`
 
 ## Dev commands (verified in `Makefile` / `pyproject.toml`)
 
@@ -46,7 +46,7 @@ make check          # ruff + mypy + pytest
 make test
 make test-puppy
 make optimize Q="MATCH (n:Person) RETURN n.name" WRITE=puppygraph
-make optimize Q="..." DISABLE=qualify CONSTRAINT_DISABLE=ensure_row_limit
+make optimize Q="..." DISABLE=qualify CONSTRAINT_DISABLE=strip_nulls_order_modifiers
 ```
 
 CI:

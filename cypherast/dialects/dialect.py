@@ -71,9 +71,11 @@ class Dialect:
         return rules.apply(tree, copy=False, schema=schema)
 
     @classmethod
-    def validate(cls, tree: a.AstNode) -> list[ConstraintIssue]:
-        """List remaining capability violations (empty = OK)."""
-        return validate_capabilities(tree, cls.capabilities)
+    def validate(
+        cls, tree: a.AstNode, schema: object | None = None
+    ) -> list[ConstraintIssue]:
+        """List remaining capability / schema violations (empty = OK)."""
+        return validate_capabilities(tree, cls.capabilities, schema=schema)
 
     @classmethod
     def optimize(
@@ -81,14 +83,20 @@ class Dialect:
         tree: a.AstNode,
         schema: object | None = None,
         *,
-        strict: bool = False,
+        strict: bool = True,
         only: t.Iterable[str] | None = None,
         disable: t.Iterable[str] | None = None,
         constraint_only: t.Iterable[str] | None = None,
         constraint_disable: t.Iterable[str] | None = None,
         rules: RuleSet | None = None,
     ) -> a.AstNode:
-        """Canonicalizer + dialect constraints; rules toggleable by name."""
+        """Canonicalizer + dialect constraints; raise if still invalid.
+
+        ``strict=True`` (default): after rewrites, raise ``ValidationError`` for
+        any remaining capability/schema issue (same as ``validate``). Use
+        ``strict=False`` only when you want a rewritten AST that may still fail
+        the target dialect.
+        """
         from cypherast.optimizer import RULES
         from cypherast.optimizer import optimize as opt_optimize
 
@@ -105,7 +113,7 @@ class Dialect:
             require_labelled_nodes=cls.capabilities.require_labelled_nodes,
         )
         if strict:
-            raise_if_invalid(node, cls.capabilities)
+            raise_if_invalid(node, cls.capabilities, schema=schema)
         return node
 
 

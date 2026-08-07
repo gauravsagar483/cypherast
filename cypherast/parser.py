@@ -158,7 +158,28 @@ class Parser:
                 desc = True
             else:
                 self._match(TokenKind.ASC)
-            items.append(a.Ordered(this=expr, desc=desc or None))
+            nulls = None
+            # Contextual: ORDER BY … NULLS FIRST|LAST (idents, not reserved keywords)
+            if (
+                self._check(TokenKind.IDENT)
+                and self._peek().text.upper() == "NULLS"
+            ):
+                self._advance()
+                if (
+                    self._check(TokenKind.IDENT)
+                    and self._peek().text.upper() == "FIRST"
+                ):
+                    self._advance()
+                    nulls = "FIRST"
+                elif (
+                    self._check(TokenKind.IDENT)
+                    and self._peek().text.upper() == "LAST"
+                ):
+                    self._advance()
+                    nulls = "LAST"
+                else:
+                    raise self._err("Expected FIRST or LAST after NULLS", code="CG1102")
+            items.append(a.Ordered(this=expr, desc=desc or None, nulls=nulls))
             if not self._match(TokenKind.COMMA):
                 break
         return a.Order(expressions=items)
@@ -393,7 +414,8 @@ class Parser:
             return rel
         if self._match(TokenKind.ARROW_RIGHT):
             return a.RelationshipPattern(direction=a.Direction.OUTGOING)
-        # anonymous undirected --
+        # anonymous undirected ``--`` (second ``-``)
+        self._match(TokenKind.MINUS)
         return a.RelationshipPattern(direction=a.Direction.BOTH)
 
     def _parse_rel_detail(self, direction: a.Direction) -> a.RelationshipPattern:
@@ -474,21 +496,32 @@ class Parser:
 
     def parse_not(self) -> a.AstNode:
         if self._match(TokenKind.NOT):
-            # Pattern predicate: NOT (n)-[:R]->()
+            # Pattern predicate: NOT (n)-[:R]->() / NOT ((n)-[:R]->())
             if self._check(TokenKind.LPAREN) and self._looks_like_pattern_start():
-                return a.PatternPredicate(pattern=self.parse_path_pattern(), not_=True)
+                # Optional extra wrapping paren: NOT ((path))
+                extra = False
+                if self._peek(1).kind is TokenKind.LPAREN and self._inner_looks_like_pattern(
+                    1
+                ):
+                    self._advance()  # consume outer (
+                    extra = True
+                pred = a.PatternPredicate(pattern=self.parse_path_pattern(), not_=True)
+                if extra:
+                    self._expect(TokenKind.RPAREN)
+                return pred
             return a.Not(this=self.parse_not())
         # EXISTS { … } / EXISTS (pattern) handled in primary
         return self.parse_comparison()
 
-    def _looks_like_pattern_start(self) -> bool:
-        """True if ``(`` begins a node pattern rather than a parenthesized expression."""
-        # Peek: ( IDENT? :? or ( ) or ( {
-        if not self._check(TokenKind.LPAREN):
+    def _inner_looks_like_pattern(self, from_paren_offset: int) -> bool:
+        """True if token after a ``(`` at ``from_paren_offset`` starts a node pattern."""
+        # from_paren_offset=0 → current is (; =1 → peek(1) is (
+        base = from_paren_offset
+        if self._peek(base).kind is not TokenKind.LPAREN:
             return False
-        n1 = self._peek(1).kind
-        n2 = self._peek(2).kind
-        if n1 in (TokenKind.COLON, TokenKind.RPAREN, TokenKind.LBRACE):
+        n1 = self._peek(base + 1).kind
+        n2 = self._peek(base + 2).kind
+        if n1 in (TokenKind.COLON, TokenKind.RPAREN, TokenKind.LBRACE, TokenKind.LPAREN):
             return True
         return n1 is TokenKind.IDENT and n2 in (
             TokenKind.COLON,
@@ -498,6 +531,15 @@ class Parser:
             TokenKind.ARROW_LEFT,
             TokenKind.ARROW_RIGHT,
         )
+
+    def _looks_like_pattern_start(self) -> bool:
+        """True if ``(`` begins a node pattern rather than a parenthesized expression."""
+        if not self._check(TokenKind.LPAREN):
+            return False
+        # NOT ((path)) — outer paren wraps a pattern
+        if self._peek(1).kind is TokenKind.LPAREN and self._inner_looks_like_pattern(1):
+            return True
+        return self._inner_looks_like_pattern(0)
 
     def parse_comparison(self) -> a.AstNode:
         left = self.parse_add()
@@ -683,14 +725,23 @@ class Parser:
 
     def _parse_paren_or_pattern(self) -> a.AstNode:
         """Parenthesized expression, or positive pattern predicate ``(a)-[:R]->(b)``."""
-        # Pattern predicate (no extra outer wrap): WHERE (n)-[:R]->(:L)
+        # Pattern predicate: WHERE (n)-[:R]->(:L) or WHERE ((n)-[:R]->(:L))
         if self._looks_like_pattern_start():
             saved = self._i
             try:
+                extra = False
+                if self._peek(1).kind is TokenKind.LPAREN and self._inner_looks_like_pattern(
+                    1
+                ):
+                    self._advance()  # outer (
+                    extra = True
                 path = self.parse_path_pattern()
                 # Relationship path → pattern predicate (same as NOT (path))
                 if len(path.elements) > 1:
-                    self._match(TokenKind.RPAREN)  # optional ((path))
+                    if extra:
+                        self._expect(TokenKind.RPAREN)
+                    else:
+                        self._match(TokenKind.RPAREN)  # optional trailing )
                     return a.PatternPredicate(pattern=path, not_=False)
                 # Single-node path: only treat labelled / props as predicate; bare (n) → below
                 if (
@@ -701,7 +752,10 @@ class Parser:
                         or path.elements[0].properties is not None
                     )
                 ):
-                    self._match(TokenKind.RPAREN)
+                    if extra:
+                        self._expect(TokenKind.RPAREN)
+                    else:
+                        self._match(TokenKind.RPAREN)
                     return a.PatternPredicate(pattern=path, not_=False)
                 self._i = saved
             except ParseError:

@@ -18,7 +18,7 @@ from cypherast.errors import (
 from cypherast.lexer import Lexer, Token, TokenKind
 from cypherast.parser import Parser
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 
 def parse(cypher: str, read: str | None = None) -> list[ast.AstNode]:
@@ -40,7 +40,7 @@ def optimize(
     read: str | None = None,
     write: str | None = None,
     *,
-    strict: bool = False,
+    strict: bool = True,
     only: list[str] | tuple[str, ...] | None = None,
     disable: list[str] | tuple[str, ...] | None = None,
     constraint_only: list[str] | tuple[str, ...] | None = None,
@@ -53,7 +53,14 @@ def optimize(
 
     Rules are named. Filter with ``only`` / ``disable`` for canonicalizer rules,
     and ``constraint_only`` / ``constraint_disable`` for dialect constraints
-    (e.g. ``ensure_row_limit``, ``split_multi_path_match``).
+    (e.g. ``strip_nulls_order_modifiers``, ``guard_optional_scalar_use``).
+
+    After rewrite, remaining dialect/schema violations raise ``ValidationError``
+    (same codes as ``validate``: CG12xx–CG14xx). Pass ``strict=False`` only to
+    get a rewritten AST that may still be invalid for the target engine.
+
+    Pass ``schema=GraphSchema(...)`` for labelling + catalog checks
+    (id-fields / undeclared props on known labels).
     """
     from cypherast.dialects.dialect import get_dialect_cls
 
@@ -77,7 +84,7 @@ def translate(
     to_: str | None = None,
     pretty: bool = False,
     optimize: bool = False,
-    strict: bool = False,
+    strict: bool | None = None,
     only: list[str] | tuple[str, ...] | None = None,
     disable: list[str] | tuple[str, ...] | None = None,
     constraint_only: list[str] | tuple[str, ...] | None = None,
@@ -86,10 +93,15 @@ def translate(
     """Parse with ``from_`` dialect and render with ``to_`` dialect (transpile).
 
     When ``optimize=True``, runs shared rewriter + target capability constraints
-    before render (useful for puppygraph emit). Rule filters pass through.
+    before render, then raises ``ValidationError`` on remaining dialect issues
+    (same as ``optimize``). Override with ``strict=False`` for soft emit.
+    Plain transpile (``optimize=False``) does not validate unless ``strict=True``.
     """
     from cypherast.dialects.constraints import raise_if_invalid
     from cypherast.dialects.dialect import get_dialect_cls
+
+    if strict is None:
+        strict = optimize
 
     tree = parse_one(cypher, read=from_)
     target_cls = get_dialect_cls(to_ or from_)
@@ -120,12 +132,20 @@ def validate(
     *,
     read: str | None = None,
     dialect: str | None = None,
+    schema: object | None = None,
 ) -> list[object]:
-    """Return capability ``ConstraintIssue`` list for ``dialect`` (default ``read``)."""
+    """Return capability ``ConstraintIssue`` list for ``dialect`` (default ``read``).
+
+    ``optimize(..., write=dialect)`` already raises on these issues by default.
+    Use ``validate`` to inspect without rewriting, or after ``optimize(..., strict=False)``.
+
+    Pass ``schema=GraphSchema(...)`` to reject id-field property access and
+    (when ``schema.strict``) undeclared properties on known labels/rel types.
+    """
     from cypherast.dialects.dialect import get_dialect_cls
 
     tree = cypher if isinstance(cypher, ast.AstNode) else parse_one(cypher, read=read)
-    return list(get_dialect_cls(dialect or read).validate(tree))
+    return list(get_dialect_cls(dialect or read).validate(tree, schema=schema))
 
 
 

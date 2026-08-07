@@ -44,6 +44,16 @@ def test_not_pattern_predicate():
     assert tree.find(a.PatternPredicate)
 
 
+def test_not_double_paren_and_undirected():
+    for q in (
+        "MATCH (n:A) WHERE NOT ((n)-[:R]->(:B)) RETURN n",
+        "MATCH (n) WHERE NOT (n)--() RETURN n",
+        "MATCH (n:A) WHERE ((n)-[:R]->(:B)) RETURN n",
+    ):
+        tree = cypherast.parse_one(q)
+        assert tree.find(a.PatternPredicate)
+
+
 def test_exists_pattern():
     tree = cypherast.parse_one("MATCH (n) WHERE EXISTS ((n)-[:R]->()) RETURN n")
     assert tree.find(a.PatternPredicate)

@@ -3,7 +3,7 @@
 ## What this repo is
 
 **cypherast** is a Cypher/GQL library (lexer → parser → AST → named rewrite rules → planner → in-memory executor).
-Python 3.13+, zero runtime dependencies, MIT. Public API lives in `cypherast/__init__.py`.
+Python 3.11+, zero runtime dependencies, MIT. Public API lives in `cypherast/__init__.py`.
 
 This is a **graph query** toolchain. Use Cypher/GQL vocabulary (MATCH, pattern, binding, hop, dialect). Do not frame APIs or reviews in SQL terms.
 
@@ -21,6 +21,8 @@ Flag as blockers:
 6. Breaking `AstNode.cypher(...)` / `cypher=` public naming
 7. Skipping tests for parser, rewriter, optimizer rule, or dialect capability changes
 8. Lowering coverage gate or silencing CI (`|| true` on mypy/tests) without discussion
+9. Re-adding LIMIT injection or hop-cap silent rewrite for PuppyGraph without an explicit product ask
+10. Softening `optimize` default `strict=True` without documenting the API break
 
 Nits (non-blocking unless pervasive):
 
@@ -46,10 +48,12 @@ Pipeline order: parse → (optional) optimize/constraints → render / plan / ru
 ## Dialects & optimize
 
 - Dialects: `opencypher`, `neo4j`, `memgraph`, `puppygraph`
-- `optimize(..., write=)` applies canonicalizer rules then write-dialect constraints
+- `optimize(..., write=)` applies canonicalizer rules then write-dialect constraints, then raises if `strict=True` (default)
 - Filters: `only` / `disable` (canonicalizer), `constraint_only` / `constraint_disable`
 - Default rules: `qualify` → `canonicalize_patterns` → `simplify` → `pushdown_predicates` → `annotate_types`
 - Opt-in: `OPTIONAL_RULES` includes `merge_match_chains`
+- PuppyGraph: labelled MATCH, FET-45 CASE guard, strip NULLS order; **no** LIMIT inject / hop-cap rewrite
+- Schema catalog via `schema=`; `GraphSchema.strict` defaults False
 
 ## How to verify locally (tell authors)
 

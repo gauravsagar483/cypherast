@@ -9,8 +9,9 @@ from cypherast.dialects.constraints import (
     cap_collect_distinct,
     drop_distinct_beside_aggregate,
     ensure_labelled_nodes,
-    ensure_row_limit,
+    guard_optional_scalar_use,
     split_multi_path_match,
+    strip_nulls_order_modifiers,
 )
 from cypherast.optimizer.engine import Rule, RuleSet
 from cypherast.rewriter.annotate_types import annotate_types
@@ -55,7 +56,9 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
 
         rules.append(Rule("ensure_labelled_nodes", _labels))
 
-    if caps.max_var_length_hops is not None or not caps.allow_unbounded_var_length:
+    if caps.rewrite_var_length_bounds and (
+        caps.max_var_length_hops is not None or not caps.allow_unbounded_var_length
+    ):
         max_hops = caps.max_var_length_hops or 5
         allow_unbounded = caps.allow_unbounded_var_length
 
@@ -67,7 +70,7 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
 
         rules.append(Rule("bound_variable_length", _bound))
 
-    if not caps.allow_cartesian_match_paths:
+    if not caps.allow_cartesian_match_paths and caps.rewrite_cartesian_match_paths:
 
         def _split(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
             _ = schema
@@ -75,16 +78,10 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
 
         rules.append(Rule("split_multi_path_match", _split))
 
-    if caps.require_limit_on_row_return:
-        limit = caps.default_row_limit
-
-        def _limit(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
-            _ = schema
-            return ensure_row_limit(tree, limit=limit)
-
-        rules.append(Rule("ensure_row_limit", _limit))
-
-    if not caps.allow_distinct_with_aggregate:
+    if (
+        not caps.allow_distinct_with_aggregate
+        and caps.rewrite_distinct_beside_aggregate
+    ):
 
         def _distinct(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
             _ = schema
@@ -92,7 +89,10 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
 
         rules.append(Rule("drop_distinct_beside_aggregate", _distinct))
 
-    if caps.max_collect_distinct_per_clause is not None:
+    if (
+        caps.rewrite_collect_distinct_cap
+        and caps.max_collect_distinct_per_clause is not None
+    ):
         max_n = caps.max_collect_distinct_per_clause
 
         def _collect(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
@@ -100,5 +100,21 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
             return cap_collect_distinct(tree, max_n=max_n)
 
         rules.append(Rule("cap_collect_distinct", _collect))
+
+    if not caps.allow_nulls_order_modifiers:
+
+        def _nulls(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
+            _ = schema
+            return strip_nulls_order_modifiers(tree)
+
+        rules.append(Rule("strip_nulls_order_modifiers", _nulls))
+
+    if caps.rewrite_unguarded_optional_scalar_use:
+
+        def _opt_guard(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
+            _ = schema
+            return guard_optional_scalar_use(tree)
+
+        rules.append(Rule("guard_optional_scalar_use", _opt_guard))
 
     return RuleSet(rules)

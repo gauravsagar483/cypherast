@@ -34,25 +34,30 @@ def test_only_simplify():
     assert out.cypher() == "RETURN 2" or "2" in out.cypher()
 
 
-def test_constraint_disable_ensure_row_limit():
+def test_constraint_disable_strip_nulls():
     out = cypherast.optimize(
-        "MATCH (n:Person) RETURN n.name",
+        "MATCH (n:person) RETURN n.name ORDER BY n.name NULLS LAST",
         write="puppygraph",
-        constraint_disable=["ensure_row_limit"],
+        constraint_disable=["strip_nulls_order_modifiers"],
+        strict=False,
     ).cypher(dialect="puppygraph")
-    assert "LIMIT" not in out.upper()
+    assert "NULLS" in out.upper()
 
 
 def test_constraint_only_split_cartesian():
-    out = cypherast.optimize(
-        "MATCH (a:Person), (b:Person) RETURN a, b LIMIT 10",
-        write="puppygraph",
-        only=[],  # skip canonicalizer
-        constraint_only=["split_multi_path_match"],
-    ).cypher(dialect="puppygraph")
+    """split_multi_path_match still available when rewrite flag is on."""
+    from cypherast.dialects.capabilities import DialectCapabilities
+    from cypherast.dialects.constraints import split_multi_path_match
+
+    caps = DialectCapabilities(
+        allow_cartesian_match_paths=False,
+        rewrite_cartesian_match_paths=True,
+    )
+    rs = constraint_rules(caps)
+    assert "split_multi_path_match" in rs.names
+    tree = cypherast.parse_one("MATCH (a:Person), (b:Person) RETURN a, b LIMIT 10")
+    out = split_multi_path_match(tree).cypher()
     assert out.upper().count("MATCH") >= 2
-    # ensure_row_limit not in constraint_only → no extra LIMIT if already present
-    assert "LIMIT" in out.upper()
 
 
 def test_ruleset_disable_unknown_raises():
@@ -65,10 +70,14 @@ def test_ruleset_disable_unknown_raises():
 
 def test_puppygraph_constraint_rule_names():
     names = PuppyGraph.constraint_rule_set().names
-    assert "ensure_row_limit" in names
-    assert "split_multi_path_match" in names
-    assert "cap_collect_distinct" in names
-    assert "bound_variable_length" not in names  # unbounded allowed
+    assert "ensure_labelled_nodes" in names
+    assert "ensure_row_limit" not in names
+    assert "guard_optional_scalar_use" in names
+    # Reject-only (no silent rewrite that greenwashes engine failures)
+    assert "split_multi_path_match" not in names
+    assert "cap_collect_distinct" not in names
+    assert "bound_variable_length" not in names
+    assert "drop_distinct_beside_aggregate" not in names
 
 
 def test_opt_in_merge_match_chains():
