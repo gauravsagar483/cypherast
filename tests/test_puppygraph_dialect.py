@@ -256,29 +256,55 @@ def test_optimize_prior_bound_label_not_neighbor_copy():
 
 
 def test_optimize_labels_anonymous_endpoints():
-    """PuppyGraph optimize fills () from default schema — no CG1402 after."""
+    """No schema → residual :_Node on bare ends (not domain invent)."""
     opt = cypherast.optimize(
         "MATCH ()-[e:knows]->() RETURN e LIMIT 20",
         write="puppygraph",
     )
     out = opt.cypher(dialect="puppygraph")
     assert "()" not in out.replace(" ", "")
-    assert ":person" in out.lower()
+    assert ":_Node" in out or "_Node" in out
     assert "knows" in out.lower()
     issues = cypherast.validate(opt, dialect="puppygraph")
     assert not any(i.code == "CG1402" for i in issues)
 
 
 def test_optimize_labels_multi_rel_end():
-    """knows|created → end gets :person|software from schema."""
+    """knows|created → end gets :person|software when schema has endpoints."""
+    gs = GraphSchema()
+    gs.add_label("person")
+    gs.add_label("software")
+    gs.add_rel("knows", "person", "person")
+    gs.add_rel("created", "person", "software")
     opt = cypherast.optimize(
         "MATCH (a:person)-[:knows|created]->(b) RETURN a.name, labels(b) AS labs LIMIT 20",
         write="puppygraph",
+        schema=gs,
     )
     out = opt.cypher(dialect="puppygraph")
     assert "person|software" in out.lower() or (":person" in out.lower() and "software" in out.lower())
     issues = cypherast.validate(opt, dialect="puppygraph")
     assert not any(i.code == "CG1402" for i in issues)
+
+
+def test_optimize_bare_residual_node():
+    """Bare MATCH (n) → (n:_Node); no CG1402 after optimize."""
+    opt = cypherast.optimize("MATCH (n) RETURN n", write="puppygraph")
+    out = opt.cypher(dialect="puppygraph")
+    assert "n:_Node" in out.replace(" ", "")
+    assert not any(i.code == "CG1402" for i in cypherast.validate(opt, dialect="puppygraph"))
+
+
+def test_call_subquery_return_in_scope():
+    """CALL { … RETURN x } exports x for outer RETURN (CG1201)."""
+    q = (
+        "MATCH (p:Person) CALL { MATCH (a:Animal) RETURN a.name AS animal_name } "
+        "RETURN p.name AS person_name, animal_name"
+    )
+    opt = cypherast.optimize(q, write="puppygraph")
+    assert "animal_name" in opt.cypher(dialect="puppygraph")
+    issues = cypherast.validate(q, dialect="puppygraph")
+    assert not any(i.code == "CG1201" for i in issues)
 
 
 def test_optimize_mines_labels_from_lineage_query():

@@ -15,6 +15,10 @@ def test_lineage():
     node = cypherast.lineage(tree, binding="name")
     assert node.name == "name"
     assert list(node.walk())
+    # Second call must still hit the public function (not the submodule).
+    again = cypherast.lineage(tree, binding="name")
+    assert again.name == "name"
+    assert callable(cypherast.lineage)
 
 
 def test_profile():

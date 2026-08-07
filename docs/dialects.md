@@ -42,21 +42,21 @@ PuppyGraph subclasses openCypher. On `optimize` / `validate` it typically:
 
 | Behavior | Notes |
 |----------|--------|
-| Require labelled MATCH nodes | `ensure_labelled_nodes` + CG1402 (schema/mined endpoints; no neighbor-label invent) |
+| Require labelled MATCH nodes | `ensure_labelled_nodes`: mine/infer from query + caller `schema=`; residual `:_Node` |
 | Reject true Cartesians | Disjoint multi-path MATCH; adjacent consecutive MATCH with no shared vars |
 | Allow connected multi-path | e.g. `MATCH (a), (a)-[:R]->(b)` |
 | Reject APT-18 / TE-14 / DISTINCT+agg landmines | Reject, don’t greenwash |
 | Strip `NULLS FIRST/LAST` | Rewrite |
 | Guard OPTIONAL `id()`/`split`/… | FET-45 CASE rewrite; `id(var) IS NOT NULL` counts; OR does not |
 | Reject mismatched CASE arms | ET-16/ET-17: list↔list-lit, list↔map, list↔scalar (`allow_mismatched_case_arms=False`) |
-| Undefined vars | **CG1201** (`WITH *`, SET/DELETE/REMOVE, comprehension binders) |
-| Default tutorial schema when `schema=` omitted | Labelling only (`strict=False`) |
+| Undefined vars | **CG1201** (`WITH *`, SET/DELETE/REMOVE, comprehension binders, `CALL { }` RETURN exports) |
+| No default domain schema | Pass caller `GraphSchema` for endpoint inference; omit → query mine + `:_Node` residual |
 
 **Non-goals for PuppyGraph in cypherast:**
 
 - Injecting `LIMIT`
 - Enforcing max hops / rejecting unbounded `*` (query_guard / prevalid)
-- Domain property catalogs without caller `GraphSchema`
+- Domain property catalogs / tutorial `person`/`software` inject without caller `GraphSchema`
 - Inventing endpoint labels by copying the neighbor when schema has no endpoints
 - Running graph algorithms inside `optimize` / in-memory `run` (parse+render only; execute on PuppyGraph)
 

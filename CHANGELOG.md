@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- ``CALL { … }`` **RETURN** aliases exported to outer scope for CG1201 (PuppyGraph).
+- Residual ``:_Node`` (+ ``_n_K`` if anon) after ``ensure_labelled_nodes`` mine/infer.
+- Web Cypher transpile fixtures: ``tests/fixtures/web_cypher_queries.py``.
+
+### Fixed
+
+- ``cypherast.lineage`` no longer overwritten by the ``lineage`` submodule on first
+  call (lazy import rebound the package attribute to the module).
+
+### Changed
+
+- Removed ``modern_graph_schema()`` and PuppyGraph default-schema inject. Pass
+  caller ``schema=`` for endpoint inference; omit → query mine only + ``:_Node``.
+
 ## [0.1.8] - 2026-08-07
 
 ### Added

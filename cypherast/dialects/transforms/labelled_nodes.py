@@ -14,12 +14,13 @@ def ensure_labelled_nodes(
 ) -> a.AstNode:
     """Fill missing MATCH node labels from schema + labels already in the query.
 
-    1. Seed a working ``GraphSchema`` from ``schema`` (if any).
+    1. Seed a working ``GraphSchema`` from ``schema`` (if any; else empty).
     2. Mine ``(Lab)-[:R]->(Lab)`` segments in this tree into that schema.
-    3. Infer missing ends from typed relationships (fixpoint).
+    3. Infer missing ends from typed relationships (endpoint).
+    4. Residual still-bare nodes get synthetic ``:_Node`` (and ``_n_K`` if anon).
 
-    Always runs (even when caller schema has no rel_types) so lineage-style
-    queries that already name labels on some clauses can label the rest.
+    No dialect-default domain catalog — pass ``schema=`` for endpoint inference
+    beyond query mining.
     """
     base = schema if isinstance(schema, GraphSchema) else GraphSchema()
     # Shallow working copy of rel endpoints (do not mutate caller schema)
@@ -253,4 +254,20 @@ def ensure_labelled_nodes(
                 _mine_path(path)
         else:
             break
+
+    # Residual: still-bare MATCH nodes get synthetic :_Node (+ _n_K if anon).
+    # Last resort after schema/mine inference — not a domain label guess.
+    _DUMMY = "_Node"
+    for path in paths:
+        for el in path.elements or []:
+            if not isinstance(el, a.NodePattern):
+                continue
+            if _existing_labels(el):
+                continue
+            el.labels = a.LabelExpression(labels=[_DUMMY])
+            if el.variable is None:
+                el.variable = a.Identifier(this=_name())
+            vn = _var_name(el)
+            if vn:
+                var_labels.setdefault(vn, set()).add(_DUMMY)
     return tree

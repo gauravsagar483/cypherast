@@ -90,8 +90,35 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                 out.add(n.this)
         return out
 
-    def _check_query(q: a.Query) -> list[ConstraintIssue]:
-        scope: set[str] = set()
+    def _return_aliases(node: a.AstNode | None) -> set[str]:
+        """Names exported by a subquery / branch RETURN (or UNION arms)."""
+        if node is None:
+            return set()
+        if isinstance(node, a.Cypher):
+            return _return_aliases(node.this)
+        if isinstance(node, a.Union):
+            return _return_aliases(node.this) | _return_aliases(node.expression)
+        if isinstance(node, a.Query):
+            for clause in reversed(node.clauses or []):
+                if isinstance(clause, a.Return):
+                    out: set[str] = set()
+                    for expr in clause.expressions or []:
+                        if isinstance(expr, a.Star):
+                            continue
+                        an = _alias_name(expr)
+                        if an:
+                            out.add(an)
+                    return out
+            return set()
+        return set()
+
+    def _check_query(
+        q: a.Query,
+        *,
+        initial: set[str] | None = None,
+        enclosing: set[str] | None = None,
+    ) -> list[ConstraintIssue]:
+        scope: set[str] = set(initial or ())
         for clause in q.clauses or []:
             if isinstance(clause, (a.Match, a.Create, a.Merge)):
                 _add_pattern_vars(clause.pattern, scope)
@@ -103,13 +130,15 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                             name, "Project it in WITH or reintroduce via MATCH"
                         )
             elif isinstance(clause, a.With):
+                # Subquery leading WITH may import from enclosing outer scope.
+                with_scope = scope | (enclosing or set())
                 for expr in clause.expressions or []:
                     if isinstance(expr, a.Star):
                         continue
                     core = expr.this if isinstance(expr, a.Alias) else expr
                     binders = _local_binders(core)
                     for name in _refs(core, ignore=binders):
-                        if name not in scope:
+                        if name not in with_scope:
                             return _issue(
                                 name, "Project it in a prior WITH or MATCH"
                             )
@@ -134,6 +163,8 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                                 "WITH ORDER BY / SKIP / LIMIT use projected aliases",
                             )
                 scope = nxt
+                # After first WITH, imports are explicit — drop enclosing.
+                enclosing = None
             elif isinstance(clause, a.Unwind):
                 for name in _refs(clause.expression):
                     if name not in scope:
@@ -161,6 +192,41 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                     if name not in where_scope:
                         return _issue(name, "YIELD the name before WHERE, or bind earlier")
                 scope = scope | yielded
+            elif isinstance(clause, a.CallSubquery):
+                inner = clause.query
+                # Classic CALL { }: empty inner scope; leading WITH imports from outer.
+                # CALL (*) / CALL (vars) when variables is set (parser may add later).
+                init: set[str] = set()
+                vars_ = getattr(clause, "variables", None)
+                if vars_ is not None:
+                    if isinstance(vars_, a.Star):
+                        init = set(scope)
+                    elif isinstance(vars_, list):
+                        for v in vars_:
+                            if isinstance(v, a.Identifier) and v.this in scope:
+                                init.add(v.this)
+                            elif isinstance(v, str) and v in scope:
+                                init.add(v)
+                branches: list[a.Query] = []
+                if isinstance(inner, a.Query):
+                    branches = [inner]
+                elif isinstance(inner, a.Union):
+                    for qn in inner.find_all(a.Query):
+                        assert isinstance(qn, a.Query)
+                        branches.append(qn)
+                elif isinstance(inner, a.Cypher) and isinstance(inner.this, a.Query):
+                    branches = [inner.this]
+                elif isinstance(inner, a.Cypher) and isinstance(inner.this, a.Union):
+                    for qn in inner.this.find_all(a.Query):
+                        assert isinstance(qn, a.Query)
+                        branches.append(qn)
+                for branch in branches:
+                    issues = _check_query(
+                        branch, initial=set(init), enclosing=set(scope)
+                    )
+                    if issues:
+                        return issues
+                scope = scope | _return_aliases(inner)
             elif isinstance(clause, a.Set):
                 for item in clause.items or []:
                     for name in _refs(item):

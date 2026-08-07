@@ -6,7 +6,7 @@ import pytest
 
 import cypherast
 from cypherast.errors import ValidationError
-from cypherast.schema import GraphSchema, modern_graph_schema
+from cypherast.schema import GraphSchema, PropertyDef
 
 
 def _dq_schema() -> GraphSchema:
@@ -181,15 +181,13 @@ def test_remove_unknown_label_strict():
     assert any(i.code == "CG1301" and "Ghost" in i.message for i in issues)
 
 
-def test_puppygraph_default_schema_open_world():
-    """Omitted schema → modern_graph_schema(strict=False) → no CG1301/CG1302."""
+def test_puppygraph_open_world_without_catalog():
+    """No schema / non-strict → unknown labels not CG1301/CG1302."""
     issues = cypherast.validate(
         "MATCH (n:Dataset)-[:INCLUDES_DIMENSION_COLUMN]->(m:Metric) RETURN n",
         dialect="puppygraph",
-        schema=modern_graph_schema(),
     )
     assert not any(i.code in {"CG1301", "CG1302"} for i in issues)
-    # optimize without caller schema also stays open-world for labels
     tree = cypherast.optimize(
         "MATCH (n:Dataset) RETURN n LIMIT 1",
         write="puppygraph",
@@ -219,9 +217,10 @@ def test_rel_id_field():
     assert any(i.code == "CG1305" for i in issues)
 
 
-def test_modern_graph_default_non_strict():
-    s = modern_graph_schema()
-    assert s.strict is False
+def test_non_strict_ignores_undeclared_props():
+    s = GraphSchema(strict=False)
+    s.add_label("person")
+    s.labels["person"].properties["name"] = PropertyDef(name="name", type="string")
     issues = cypherast.validate(
         "MATCH (n:person) RETURN n.extra_prop",
         schema=s,

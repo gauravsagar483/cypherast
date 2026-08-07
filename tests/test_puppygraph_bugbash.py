@@ -5,7 +5,20 @@ import pytest
 import cypherast
 from cypherast.errors import ValidationError
 from cypherast.optimizer.merge_match_chains import merge_match_chains
-from cypherast.schema import GraphSchema, modern_graph_schema
+from cypherast.schema import GraphSchema
+
+
+def _person_software_schema() -> GraphSchema:
+    """Inline tutorial graph for schema-inference tests (not a dialect default)."""
+    from cypherast.schema import PropertyDef
+
+    s = GraphSchema(strict=False)
+    s.add_label("person")
+    s.labels["person"].properties["name"] = PropertyDef(name="name", type="string")
+    s.add_label("software")
+    s.add_rel("knows", "person", "person")
+    s.add_rel("created", "person", "software")
+    return s
 
 # --- require_labelled_nodes -------------------------------------------------
 
@@ -29,7 +42,7 @@ def test_bb02_label_or_roundtrips():
     opt = cypherast.optimize(
         "MATCH (a:person)-[:knows|created]->(b) RETURN b",
         write="puppygraph",
-        schema=modern_graph_schema(),
+        schema=_person_software_schema(),
     )
     out = opt.cypher(dialect="puppygraph")
     # Must reparse (no ParseError on |)
@@ -39,15 +52,16 @@ def test_bb02_label_or_roundtrips():
 
 
 def test_bb19_no_wrong_neighbor_label_without_schema():
-    """Unknown rel: leave unlabelled end → CG1402, don't invent Software on person end."""
-    with pytest.raises(ValidationError) as ei:
-        cypherast.optimize(
-            "MATCH (a:Software)-[:CREATED_BY]->(b) RETURN a,b",
-            write="puppygraph",
-            schema=GraphSchema(),  # empty — no endpoints, no modern default override
-            strict=True,
-        )
-    assert ei.value.code in {"CG1402", "CG1401"} or "label" in str(ei.value).lower()
+    """Unknown rel: residual :_Node — never invent Software on the other end."""
+    out = cypherast.optimize(
+        "MATCH (a:Software)-[:CREATED_BY]->(b) RETURN a,b",
+        write="puppygraph",
+        schema=GraphSchema(),
+        strict=True,
+    ).cypher(dialect="puppygraph")
+    compact = out.replace(" ", "")
+    assert "b:_Node" in compact or ":_Node" in compact
+    assert "b:Software" not in compact
 
 
 def test_bb19_homogeneous_with_schema_still_labels():
@@ -210,8 +224,8 @@ def test_bb24_undefined_uses_cg1201():
 
 
 def test_bb23_map_projection_id_field():
-    gs = modern_graph_schema()
-    # person id field if catalog supports it
+    gs = GraphSchema(strict=False)
+    gs.add_label("person")
     if hasattr(gs, "add_id_field"):
         gs.add_id_field("person", "id")
     issues = cypherast.validate(

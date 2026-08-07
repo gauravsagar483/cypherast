@@ -104,6 +104,27 @@ def _walk_clause(clause: a.AstNode, scope: Scope) -> Scope:
                 if name:
                     scope.define(name, expr)
         return scope
+    if isinstance(clause, a.CallSubquery):
+        child = Scope(expression=clause, scope_type=ScopeType.SUBQUERY, parent=scope)
+        scope.children.append(child)
+        _walk_query(clause.query, child)
+        # Export RETURN aliases into enclosing scope (same as procedure YIELD).
+        root = clause.query.this if isinstance(clause.query, a.Cypher) else clause.query
+        queries: list[a.Query] = []
+        if isinstance(root, a.Query):
+            queries = [root]
+        elif isinstance(root, a.Union):
+            for q in root.find_all(a.Query):
+                assert isinstance(q, a.Query)
+                queries.append(q)
+        for q in queries:
+            for c in q.clauses or []:
+                if isinstance(c, a.Return):
+                    for expr in c.expressions or []:
+                        name = _binding_name(expr)
+                        if name:
+                            scope.define(name, expr)
+        return scope
     if isinstance(clause, (a.Create, a.Merge, a.Insert)):
         _collect_pattern_vars(clause.pattern, scope)
         return scope

@@ -13,6 +13,7 @@ alwaysApply: false
 - Named rule filters: `tests/test_optimizer_rules.py`.
 - Parser/hardening: `tests/test_parse.py`, `tests/test_hardening.py`.
 - Procedure `CALL`: `tests/test_call_procedure.py` (`CallProcedure` vs `CallSubquery`).
+- Web dialect transpile: `tests/test_web_dialect_transpile.py` + `tests/fixtures/web_cypher_queries.py`.
 - TCK parse-rate: `tests/tck/` via `make test-tck` — do not treat sample `.feature` files as a full openCypher TCK.
 
 ## Rules

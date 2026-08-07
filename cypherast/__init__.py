@@ -16,6 +16,7 @@ from cypherast.errors import (
     ValidationError,
 )
 from cypherast.lexer import Lexer, Token, TokenKind
+from cypherast.lineage import lineage as _lineage_impl
 from cypherast.parser import Parser
 
 
@@ -195,10 +196,10 @@ def lineage(
     from_: str | None = None,
 ) -> object:
     """Binding-level provenance graph for a Cypher query."""
-    from cypherast.lineage import lineage as _lineage
-
+    # Must not lazy-import ``cypherast.lineage`` inside this function: that
+    # rebinds the package attribute to the submodule and breaks later calls.
     tree = cypher if isinstance(cypher, ast.AstNode) else parse_one(cypher, read=from_)
-    return _lineage(tree, binding=binding, schema=schema)
+    return _lineage_impl(tree, binding=binding, schema=schema)
 
 
 __all__ = [

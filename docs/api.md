@@ -147,7 +147,7 @@ cypherast.optimize(
 ```
 
 Without a caller schema, undeclared domain properties / id-fields are not checked (non-goal).
-PuppyGraph's tutorial default schema is non-strict and only used for labelling.
+PuppyGraph `ensure_labelled_nodes` mines the query (and optional caller `schema=`); residual bare nodes get `:_Node`.
 
 `optimize(..., strict=False)` returns a rewritten AST that may still fail `validate` — escape hatch only.
 
