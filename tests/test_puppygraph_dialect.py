@@ -392,15 +392,52 @@ def test_harness_reject_apt18_et06_union_id_scope_varlen():
         "elementId",
     )
 
-    et17 = soft_issues(
+    # Scope (CG1201): ELSE [m.name] after WITH drops m — also ET-17 list vs list_lit
+    et17_scope = soft_issues(
         "MATCH (m:Metric) WITH collect(DISTINCT m.name) AS items "
         "RETURN CASE WHEN size(items) > 0 THEN items ELSE [m.name] END"
     )
-    assert any("not defined" in i.message for i in et17)
+    assert any("not defined" in i.message for i in et17_scope)
+    assert any("CASE" in i.message for i in et17_scope)
     must_raise(
         "MATCH (m:Metric) WITH collect(DISTINCT m.name) AS items "
         "RETURN CASE WHEN size(items) > 0 THEN items ELSE [m.name] END",
+        "CASE",
         "not defined",
+        "list",
+    )
+
+    # ET-17: collect-list vs literal list / map (fail-closed; PuppyGraph runtime)
+    et17_list = soft_issues(
+        "MATCH (m:Metric) WITH collect(DISTINCT m.name) AS items "
+        "RETURN CASE WHEN size(items) > 0 THEN items ELSE ['x'] END LIMIT 20"
+    )
+    assert any(
+        "Case" in i.message or "CASE" in i.message or "ET-17" in (i.hint or "")
+        for i in et17_list
+    ), et17_list
+    must_raise(
+        "MATCH (m:Metric) WITH collect(DISTINCT m.name) AS items "
+        "RETURN CASE WHEN size(items) > 0 THEN items ELSE ['x'] END LIMIT 20",
+        "Case",
+        "CASE",
+        "list",
+    )
+    et17_map = soft_issues(
+        "MATCH (m:Metric) WITH collect(DISTINCT m.name) AS items "
+        "RETURN CASE WHEN size(items) > 0 THEN items ELSE {a: 1} END LIMIT 20"
+    )
+    assert any(
+        "Case" in i.message or "CASE" in i.message or "ET-17" in (i.hint or "")
+        for i in et17_map
+    ), et17_map
+    must_raise(
+        "MATCH (m:Metric) WITH collect(DISTINCT m.name) AS items "
+        "RETURN CASE WHEN size(items) > 0 THEN items ELSE {a: 1} END LIMIT 20",
+        "Case",
+        "CASE",
+        "map",
+        "list",
     )
 
     # Var-length hop caps / unbounded * — query_guard / prevalid only; cypherast OK

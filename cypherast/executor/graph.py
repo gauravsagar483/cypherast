@@ -44,10 +44,15 @@ class Graph:
         self._id_gen = itertools.count(1)
 
     def create_node(
-        self, labels: t.Iterable[str] | None = None, **props: t.Any
+        self, labels: t.Iterable[str] | str | None = None, **props: t.Any
     ) -> Node:
         nid = next(self._id_gen)
-        lab = set(labels or [])
+        if labels is None:
+            lab: set[str] = set()
+        elif isinstance(labels, str):
+            lab = {labels}
+        else:
+            lab = set(labels)
         node = Node(id=nid, labels=lab, props=dict(props))
         self.nodes[nid] = node
         for l in lab:

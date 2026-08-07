@@ -52,6 +52,10 @@ class PuppyGraph(OpenCypher):
         # FET-45: rewrite adds CASE null guard; raw validate still rejects unguarded
         allow_unguarded_optional_scalar_use=False,
         rewrite_unguarded_optional_scalar_use=True,
+        optional_risky_functions=frozenset(
+            {"id", "elementid", "split", "tostring", "tointeger", "tofloat", "size"}
+        ),
+        allow_mismatched_case_arms=False,  # ET-16 / ET-17
         max_collect_distinct_per_clause=1,
         rewrite_collect_distinct_cap=False,  # APT-18: reject, don't rewrite into TE-14
         allow_collect_distinct_with_other_aggregates=False,  # TE-14

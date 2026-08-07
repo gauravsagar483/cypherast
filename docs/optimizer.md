@@ -30,7 +30,7 @@ cypherast.optimize(q, disable=["qualify"])
 cypherast.optimize(q, rules=RULES + OPTIONAL_RULES)
 ```
 
-Implementations live under `cypherast/rewriter/`. Names and order live in the optimizer catalog — do not import `optimizer` from `rewriter/__init__.py` (circular import).
+Implementations live under `cypherast/optimizer/` (canonicalizer) and `cypherast/dialects/transforms/` (capability rewrites). Names/order live in `optimizer/catalog.py`. `cypherast/rewriter/` is a shim only.
 
 ## Constraint rules
 
@@ -98,7 +98,7 @@ cypherast.validate(q, dialect="puppygraph", schema=schema)
 
 ## Rule author checklist
 
-1. Implement pure AST transform in `rewriter/` **or** constraint helper in `dialects/constraints.py`.
+1. Implement pure AST transform in `optimizer/` **or** engine rewrite in `dialects/transforms/` / reject in `dialects/validate/`.
 2. Register a named `Rule` in `optimizer/catalog.py` (canonical) or `constraint_rules` (capability-gated).
 3. Add tests under `tests/test_optimizer_rules.py` / dialect tests.
 4. Document capability flags in `DialectCapabilities` when adding engine limits.

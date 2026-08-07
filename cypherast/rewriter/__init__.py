@@ -1,4 +1,4 @@
-"""IR canonicalizer rewriter passes."""
+"""IR canonicalizer rewriter passes (back-compat re-exports from optimizer)."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ import typing as t
 from collections.abc import Iterable, Sequence
 
 from cypherast import ast as a
-from cypherast.rewriter.annotate_types import annotate_types
-from cypherast.rewriter.canonicalize_patterns import canonicalize_patterns
-from cypherast.rewriter.merge_match_chains import merge_match_chains
-from cypherast.rewriter.pushdown_predicates import pushdown_predicates
-from cypherast.rewriter.qualify import qualify
-from cypherast.rewriter.simplify import simplify
+from cypherast.optimizer.annotate_types import annotate_types
+from cypherast.optimizer.canonicalize_patterns import canonicalize_patterns
+from cypherast.optimizer.merge_match_chains import merge_match_chains
+from cypherast.optimizer.pushdown_predicates import pushdown_predicates
+from cypherast.optimizer.qualify import qualify
+from cypherast.optimizer.simplify import simplify
 
 if t.TYPE_CHECKING:
     from cypherast.optimizer.engine import RuleSet

@@ -250,7 +250,7 @@ class Parser:
             target = self.parse_postfix()
             if self._check(TokenKind.COLON) and isinstance(target, a.Identifier):
                 labels = self._parse_labels()
-                items.append(a.NodePattern(variable=target, labels=labels))
+                items.append(a.RemoveLabels(this=target, labels=labels))
             else:
                 items.append(target)
             if not self._match(TokenKind.COMMA):
@@ -877,8 +877,17 @@ class Parser:
         entries: list[t.Any] = []
         if not self._check(TokenKind.RBRACE):
             while True:
-                if self._match(TokenKind.DOT) and self._match(TokenKind.STAR):
-                    entries.append(a.Star())
+                if self._match(TokenKind.DOT):
+                    if self._match(TokenKind.STAR):
+                        entries.append(a.Star())
+                    elif self._check(TokenKind.IDENT):
+                        entries.append(
+                            a.PropertySelector(name=self._advance().text)
+                        )
+                    else:
+                        raise self._err(
+                            "Invalid map projection entry", code="CG1102"
+                        )
                 elif self._check(TokenKind.IDENT):
                     name = self._advance().text
                     if self._match(TokenKind.COLON):

@@ -170,7 +170,7 @@ uv run pytest tests/tck -q
 
 ## Status
 
-v0.1.5 — Drop module `__version__`; single source is package metadata.
+v0.1.6 — PuppyGraph ET-17 CASE arms; bug-bash executor/parse fixes; dialects transforms/validate layout.
 
 ## CI
 

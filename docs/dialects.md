@@ -30,9 +30,11 @@ List names: `cypherast.dialect_names()`.
 - `allow_cartesian_match_paths` / `rewrite_cartesian_match_paths`
 - `allow_list_concat`, `allow_distinct_with_aggregate`, …
 - `rewrite_unguarded_optional_scalar_use` (FET-45 CASE rewrite)
+- `optional_risky_functions` (which calls FET-45 guards — PuppyGraph sets id/split/…)
+- `allow_mismatched_case_arms` (ET-16/ET-17)
 - `check_undefined_variables`, `pattern_predicate_introduces_bindings`
 
-**Rule:** engine limits go in capabilities + named constraint rules — not hard-coded customer labels/rel types in dialect code.
+**Rule:** engine limits go in capabilities + named constraint rules — transforms rewrite, validate rejects. Do not hard-code customer labels/rel types in dialect code.
 
 ## PuppyGraph (write dialect)
 
@@ -46,6 +48,7 @@ PuppyGraph subclasses openCypher. On `optimize` / `validate` it typically:
 | Reject APT-18 / TE-14 / DISTINCT+agg landmines | Reject, don’t greenwash |
 | Strip `NULLS FIRST/LAST` | Rewrite |
 | Guard OPTIONAL `id()`/`split`/… | FET-45 CASE rewrite; `id(var) IS NOT NULL` counts; OR does not |
+| Reject mismatched CASE arms | ET-16/ET-17: list↔list-lit, list↔map, list↔scalar (`allow_mismatched_case_arms=False`) |
 | Undefined vars | **CG1201** (`WITH *`, SET/DELETE/REMOVE, comprehension binders) |
 | Default tutorial schema when `schema=` omitted | Labelling only (`strict=False`) |
 

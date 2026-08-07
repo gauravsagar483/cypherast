@@ -4,7 +4,7 @@ import pytest
 
 import cypherast
 from cypherast.errors import ValidationError
-from cypherast.rewriter.merge_match_chains import merge_match_chains
+from cypherast.optimizer.merge_match_chains import merge_match_chains
 from cypherast.schema import GraphSchema, modern_graph_schema
 
 # --- require_labelled_nodes -------------------------------------------------

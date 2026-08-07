@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-08-07
+
+### Fixed
+
+- PuppyGraph **ET-17**: `optimize`/`validate` reject incompatible `CASE` THEN/ELSE arms
+  (collected list vs list literal / map / scalar; map vs scalar). Hint cites `[ET-17]`.
+  Compatible: same list vars, list literals together, `null` with any arm (FET-45).
+  Scalar↔scalar (e.g. string vs int) left alone — PuppyGraph accepts those without schema.
+- Parse/render: `REMOVE n:Label` → `RemoveLabels` (no `(n:Label)` / EXISTS reparse);
+  map projection `n{.name}` preserves the property selector dot.
+- In-memory executor: OPTIONAL WHERE keeps outer row; NULL bindings not rebound by later MATCH;
+  aggregates honor `DISTINCT`; `WITH count(…)`; `ORDER BY` pre-RETURN vars; `*0..n` 0-hop;
+  `NULLS FIRST/LAST`; `Graph.create_node("label")` as a single label.
+
+### Changed
+
+- Layout: dialect rewrites → `dialects/transforms/`; reject-only checks → `dialects/validate/`;
+  `dialects/constraints.py` is a thin re-export facade. Canonicalizer passes live under
+  `optimizer/` (`rewriter/` shim remains). FET-45 risky fn set moved to
+  `DialectCapabilities.optional_risky_functions` (PuppyGraph sets it).
+
 ## [0.1.5] - 2026-08-07
 
 ### Removed
@@ -89,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dialects including openCypher and PuppyGraph capability constraints (Cartesian MATCH handling, collect/DISTINCT caps).
 - Named optimizer `Rule` / `RuleSet` with `only` / `disable` / constraint filters.
 
+[0.1.6]: https://github.com/gauravsagar483/cypherast/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/gauravsagar483/cypherast/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/gauravsagar483/cypherast/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/gauravsagar483/cypherast/compare/v0.1.2...v0.1.3

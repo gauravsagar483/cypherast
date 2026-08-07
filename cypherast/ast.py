@@ -200,9 +200,15 @@ class Identifier(AstNode):
 
 
 class Star(AstNode):
-    """RETURN * or property *."""
+    """RETURN * or map projection .* ."""
 
     arg_types = {}
+
+
+class PropertySelector(AstNode):
+    """Map projection property selector: ``n{.name}`` (distinct from bare ``n{name}``)."""
+
+    arg_types = {"name": True}
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +505,12 @@ class Delete(AstNode):
 
 class Remove(AstNode):
     arg_types = {"items": True}
+
+
+class RemoveLabels(AstNode):
+    """``REMOVE n:Label(:Label2…)`` — not a NodePattern (avoids EXISTS render)."""
+
+    arg_types = {"this": True, "labels": True}  # Identifier + LabelExpression
 
 
 class Foreach(AstNode):

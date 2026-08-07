@@ -8,14 +8,13 @@ Short map for contributors and AI assistants. Canonical policy: root [`AGENTS.md
 Cypher text
     → lexer / parser          (cypherast/lexer.py, parser.py)
     → AstNode IR              (cypherast/ast.py)
-    → dialects                (parse/render hooks, capabilities, constraints)
-    → rewriter passes         (cypherast/rewriter/*)
-    → optimizer RuleSet       (cypherast/optimizer/*)
+    → dialects                (capabilities, transforms/, validate/)
+    → optimizer RuleSet       (cypherast/optimizer/* — IR passes + catalog)
     → planner / executor      (optional: explain, run)
     → Renderer                (AstNode.cypher / dialect renderer)
 ```
 
-Do not skip layers or import backwards (especially: `rewriter/__init__.py` must not import `optimizer` at module top level).
+`rewriter/` is a back-compat shim that re-exports optimizer passes — prefer importing from `cypherast.optimizer`.
 
 ## Where to change what
 
@@ -23,8 +22,9 @@ Do not skip layers or import backwards (especially: `rewriter/__init__.py` must 
 |------|------------|
 | New AST node / arg | `ast.py`, parser, renderer, tests |
 | Parse edge case | `parser.py` + `tests/test_parse.py` |
-| Shared rewrite | `rewriter/<pass>.py` + register in `optimizer/catalog.py` |
-| Engine limit | `DialectCapabilities` + `dialects/constraints.py` + `constraint_rules` |
+| Shared IR rewrite | `optimizer/<pass>.py` + register in `optimizer/catalog.py` |
+| Engine rewrite | `dialects/transforms/` + capability flag + `constraint_rules` |
+| Engine reject | `dialects/validate/` + capability flag |
 | Public API | `cypherast/__init__.py` + `docs/api.md` |
 | In-memory exec | `executor/` |
 

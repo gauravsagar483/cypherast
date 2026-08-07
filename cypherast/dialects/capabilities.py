@@ -41,6 +41,12 @@ class DialectCapabilities:
     # to wrap with CASE WHEN var IS NULL THEN NULL ELSE … END.
     allow_unguarded_optional_scalar_use: bool = True
     rewrite_unguarded_optional_scalar_use: bool = False
+    # Function names (lowercased) treated as FET-45 risky when applied to
+    # OPTIONAL-bound vars. Empty = no-op for guard/validate of this class.
+    optional_risky_functions: frozenset[str] = frozenset()
+    # PuppyGraph ET-16/ET-17: CASE THEN/ELSE arms must share a compatible shape.
+    # When False, reject list↔list-literal, list↔map, list↔scalar, map↔scalar.
+    allow_mismatched_case_arms: bool = True
 
     # Aggregation / projection
     max_collect_distinct_per_clause: int | None = None  # None = unlimited

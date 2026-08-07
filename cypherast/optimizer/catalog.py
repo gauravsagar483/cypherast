@@ -13,13 +13,13 @@ from cypherast.dialects.constraints import (
     split_multi_path_match,
     strip_nulls_order_modifiers,
 )
+from cypherast.optimizer.annotate_types import annotate_types
+from cypherast.optimizer.canonicalize_patterns import canonicalize_patterns
 from cypherast.optimizer.engine import Rule, RuleSet
-from cypherast.rewriter.annotate_types import annotate_types
-from cypherast.rewriter.canonicalize_patterns import canonicalize_patterns
-from cypherast.rewriter.merge_match_chains import merge_match_chains
-from cypherast.rewriter.pushdown_predicates import pushdown_predicates
-from cypherast.rewriter.qualify import qualify
-from cypherast.rewriter.simplify import simplify
+from cypherast.optimizer.merge_match_chains import merge_match_chains
+from cypherast.optimizer.pushdown_predicates import pushdown_predicates
+from cypherast.optimizer.qualify import qualify
+from cypherast.optimizer.simplify import simplify
 
 # ---------------------------------------------------------------------------
 # Shared canonicalizer rules (order matters)
@@ -110,10 +110,11 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
         rules.append(Rule("strip_nulls_order_modifiers", _nulls))
 
     if caps.rewrite_unguarded_optional_scalar_use:
+        risky = caps.optional_risky_functions
 
         def _opt_guard(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
             _ = schema
-            return guard_optional_scalar_use(tree)
+            return guard_optional_scalar_use(tree, risky_functions=risky)
 
         rules.append(Rule("guard_optional_scalar_use", _opt_guard))
 

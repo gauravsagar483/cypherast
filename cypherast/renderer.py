@@ -174,6 +174,9 @@ class Renderer:
     def render_Remove(self, node: a.Remove) -> str:
         return "REMOVE " + ", ".join(self.dispatch(i) for i in node.items)
 
+    def render_RemoveLabels(self, node: a.RemoveLabels) -> str:
+        return f"{self.dispatch(node.this)}{self.dispatch(node.labels)}"
+
     def render_Foreach(self, node: a.Foreach) -> str:
         body = " ".join(self.dispatch(c) for c in node.clauses)
         return (
@@ -324,6 +327,8 @@ class Renderer:
         for e in node.entries:
             if isinstance(e, a.Star):
                 parts.append(".*")
+            elif isinstance(e, a.PropertySelector):
+                parts.append(f".{e.name}")
             elif isinstance(e, tuple):
                 parts.append(f"{e[0]}: {self.dispatch(e[1])}")
             else:

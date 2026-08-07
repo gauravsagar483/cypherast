@@ -1,7 +1,7 @@
 # cypherast — agent instructions
 
 Cypher/GQL library: lexer → parser → AST → named rewrite rules → planner → in-memory executor.
-Zero runtime deps. Python **3.11+**. Package version **0.1.5** (`pyproject.toml`). MIT.
+Zero runtime deps. Python **3.11+**. Package version **0.1.6** (`pyproject.toml`). MIT.
 
 Canonical AI instructions live here. Topic rules live under `.agents/rules/` only (no tool-specific stub/rule trees in-repo).
 
@@ -11,7 +11,7 @@ Canonical AI instructions live here. Topic rules live under `.agents/rules/` onl
 - Never frame the library as a SQL toolchain clone — see `.agents/rules/graph-native-naming.md`.
 - Prefer `AstNode.cypher(...)` for render; public params use `cypher=`, not SQL-shaped names.
 - Do not add runtime dependencies without an explicit request.
-- Do not invent dialect capability limits — read `DialectCapabilities` / `cypherast/dialects/constraints.py`.
+- Do not invent dialect capability limits — read `DialectCapabilities` / `cypherast/dialects/capabilities.py` (+ `transforms/` / `validate/`).
 - Do not hard-code customer-specific graph labels/rel types into dialect code.
 ## Public API (`cypherast/__init__.py`)
 
@@ -91,9 +91,9 @@ cypherast/
 │   ├── schema.py
 │   ├── scope.py
 │   ├── lineage.py
-│   ├── dialects/             # Dialect + capabilities + constraints
-│   ├── rewriter/             # rewrite pass implementations
-│   ├── optimizer/            # Rule / RuleSet / RULES catalog
+│   ├── dialects/             # Dialect + capabilities + transforms/ + validate/
+│   ├── rewriter/             # back-compat shim → optimizer passes
+│   ├── optimizer/            # Rule / RuleSet / RULES + IR passes
 │   ├── planner/
 │   └── executor/             # in-memory Graph + engine
 └── tests/

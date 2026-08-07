@@ -76,7 +76,27 @@ class Engine:
             if isinstance(clause, a.Match):
                 rows = self._match(clause, rows)
             elif isinstance(clause, a.With):
-                rows = self._project(clause, rows, is_with=True)
+                has_agg = any(_is_agg(e) for e in (clause.expressions or []))
+                if has_agg:
+                    fake_ret = a.Return(
+                        expressions=list(clause.expressions or []),
+                        order=clause.order,
+                        skip=clause.skip,
+                        limit=clause.limit,
+                        distinct=clause.distinct,
+                    )
+                    cols, agg_rows = self._aggregate_return(fake_ret, rows)
+                    rows = [dict(zip(cols, r, strict=False)) for r in agg_rows]
+                    if clause.where is not None:
+                        rows = [
+                            r
+                            for r in rows
+                            if cypher_true(
+                                eval_expr(clause.where.this, self._env(r))
+                            )
+                        ]
+                else:
+                    rows = self._project(clause, rows, is_with=True)
             elif isinstance(clause, a.Unwind):
                 rows = self._unwind(clause, rows)
             elif isinstance(clause, a.Create):
@@ -116,19 +136,21 @@ class Engine:
         out: list[Row] = []
         for row in rows:
             matches = self._match_pattern(clause.pattern, row)
-            if not matches and clause.optional:
-                # bind pattern vars to null
+            survivors: list[Row] = []
+            for m in matches:
+                merged = {**row, **m}
+                if clause.where is None or cypher_true(
+                    eval_expr(clause.where.this, self._env(merged))
+                ):
+                    survivors.append(merged)
+            if survivors:
+                out.extend(survivors)
+            elif clause.optional:
+                # No pattern match OR WHERE filtered all — keep outer row with nulls
                 null_row = dict(row)
                 for var in _pattern_vars(clause.pattern):
                     null_row.setdefault(var, NULL)
                 out.append(null_row)
-            else:
-                for m in matches:
-                    merged = {**row, **m}
-                    if clause.where is None or cypher_true(
-                        eval_expr(clause.where.this, self._env(merged))
-                    ):
-                        out.append(merged)
         return out
 
     def _match_pattern(self, pattern: a.Pattern, row: Row) -> list[Row]:
@@ -154,8 +176,12 @@ class Engine:
             r0 = dict(row)
             if first.variable:
                 name = first.variable.this
-                if name in r0 and r0[name] is not node and r0[name] is not NULL:
-                    continue
+                if name in r0:
+                    bound = r0[name]
+                    if is_null(bound):
+                        continue
+                    if bound is not node:
+                        continue
                 r0[name] = node
             rows.extend(self._expand(elems[1:], r0, node))
         return rows
@@ -186,21 +212,35 @@ class Engine:
             r1 = dict(row)
             if rel_pat.variable:
                 name = rel_pat.variable.this
-                if name in r1 and r1[name] is not rel and r1[name] is not NULL:
-                    continue
-                r1[name] = rel
+                if name in r1:
+                    bound = r1[name]
+                    if is_null(bound):
+                        continue
+                    if rel is not None and bound is not rel:
+                        continue
+                if rel is not None:
+                    r1[name] = rel
+                else:
+                    r1[name] = NULL
             if node_pat.variable:
                 name = node_pat.variable.this
-                if name in r1 and r1[name] is not other and r1[name] is not NULL:
-                    continue
+                if name in r1:
+                    bound = r1[name]
+                    if is_null(bound):
+                        continue
+                    if bound is not other:
+                        continue
                 r1[name] = other
             out.extend(self._expand(rest, r1, other))
         return out
 
     def _candidate_nodes(self, pat: a.NodePattern, row: Row) -> list[Node]:
-        if pat.variable and pat.variable.this in row and isinstance(row[pat.variable.this], Node):
-            n = row[pat.variable.this]
-            return [n] if self._node_matches(pat, n, row) else []
+        if pat.variable and pat.variable.this in row:
+            bound = row[pat.variable.this]
+            if is_null(bound):
+                return []
+            if isinstance(bound, Node):
+                return [bound] if self._node_matches(pat, bound, row) else []
         labels = pat.labels.labels if isinstance(pat.labels, a.LabelExpression) else []
         if labels:
             nodes = self.graph.nodes_with_label(labels[0])
@@ -225,10 +265,10 @@ class Engine:
 
     def _candidate_rels(
         self, pat: a.RelationshipPattern, current: Node
-    ) -> list[tuple[Relationship, Node]]:
+    ) -> list[tuple[Relationship | None, Node]]:
         types = pat.types
         typ = types[0] if types and len(types) == 1 else None
-        out: list[tuple[Relationship, Node]] = []
+        out: list[tuple[Relationship | None, Node]] = []
 
         def add(rel: Relationship, other_id: int) -> None:
             if types and rel.type not in types:
@@ -271,11 +311,12 @@ class Engine:
         pat: a.RelationshipPattern,
         min_h: int,
         max_h: int,
-    ) -> list[tuple[Relationship, Node]]:
-        # Return last hop rel + end node for paths of length in [min,max]
-        # Simplified: yield (None-like last rel, end node) — use last relationship
-        results: list[tuple[Relationship, Node]] = []
-        # BFS: (node, depth, last_rel, visited_rels)
+    ) -> list[tuple[Relationship | None, Node]]:
+        """Yield (last_rel_or_None, end_node) for path lengths in [min_h, max_h].
+
+        ``min_h == 0`` includes the 0-hop self row with ``last_rel is None``.
+        """
+        results: list[tuple[Relationship | None, Node]] = []
         from collections import deque
 
         q: deque[tuple[Node, int, Relationship | None, set[int]]] = deque(
@@ -283,8 +324,11 @@ class Engine:
         )
         while q:
             node, depth, last_rel, visited = q.popleft()
-            if depth >= min_h and last_rel is not None:
-                results.append((last_rel, node))
+            if depth >= min_h:
+                if last_rel is not None:
+                    results.append((last_rel, node))
+                elif depth == 0:
+                    results.append((None, node))
             if depth >= max_h:
                 continue
             candidates: list[Relationship] = []
@@ -305,7 +349,7 @@ class Engine:
         return results
 
     def _project(self, clause: a.With | a.Return, rows: list[Row], is_with: bool) -> list[Row]:
-        projected: list[Row] = []
+        paired: list[tuple[Row, Row]] = []
         for row in rows:
             env = self._env(row)
             new_row: Row = {}
@@ -316,41 +360,31 @@ class Engine:
                 val = eval_expr(expr, env)
                 name = _proj_name(expr)
                 new_row[name] = val
-            projected.append(new_row)
+            paired.append((row, new_row))
 
         if clause.distinct:
             seen: set[t.Any] = set()
-            uniq = []
-            for r in projected:
-                key = tuple(sorted((k, _freeze(v)) for k, v in r.items()))
+            uniq: list[tuple[Row, Row]] = []
+            for orig, proj in paired:
+                key = tuple(sorted((k, _freeze(v)) for k, v in proj.items()))
                 if key not in seen:
                     seen.add(key)
-                    uniq.append(r)
-            projected = uniq
+                    uniq.append((orig, proj))
+            paired = uniq
 
         if getattr(clause, "where", None) is not None and is_with:
-            projected = [
-                r
-                for r in projected
-                if cypher_true(eval_expr(clause.where.this, self._env(r)))
+            paired = [
+                (orig, proj)
+                for orig, proj in paired
+                if cypher_true(eval_expr(clause.where.this, self._env(proj)))
             ]
 
         if getattr(clause, "order", None):
             for ordered in reversed(clause.order.expressions):
                 assert isinstance(ordered, a.Ordered)
+                paired = _order_paired(paired, ordered, self)
 
-                def _key(
-                    r: Row, o: a.Ordered = ordered
-                ) -> tuple[int, t.Any]:
-                    val = eval_expr(o.this, self._env(r))
-                    null_first = 0 if is_null(val) else 1
-                    null_last = 1 if is_null(val) else 0
-                    return (
-                        (null_first if o.desc else null_last),
-                        _sort_val(val),
-                    )
-
-                projected.sort(key=_key, reverse=bool(ordered.desc))
+        projected = [proj for _orig, proj in paired]
 
         if getattr(clause, "skip", None):
             n = eval_expr(clause.skip.this, self._env({}))
@@ -559,7 +593,21 @@ class Engine:
                     obj = eval_expr(item.this, env)
                     if isinstance(obj, (Node, Relationship)):
                         obj.props.pop(item.name, None)
-                elif isinstance(item, a.NodePattern) and isinstance(item.variable, a.Identifier):
+                elif isinstance(item, a.RemoveLabels) and isinstance(
+                    item.this, a.Identifier
+                ):
+                    obj = row.get(item.this.this)
+                    if isinstance(obj, Node) and isinstance(
+                        item.labels, a.LabelExpression
+                    ):
+                        for lab in item.labels.labels or []:
+                            obj.labels.discard(lab)
+                            if lab in self.graph._by_label:
+                                self.graph._by_label[lab].discard(obj.id)
+                elif isinstance(item, a.NodePattern) and isinstance(
+                    item.variable, a.Identifier
+                ):
+                    # Legacy NodePattern form (pre-RemoveLabels)
                     obj = row.get(item.variable.this)
                     if isinstance(obj, Node) and isinstance(item.labels, a.LabelExpression):
                         for lab in item.labels.labels or []:
@@ -644,9 +692,14 @@ def _eval_agg(expr: a.AstNode, rows: list[Row], engine: Engine) -> t.Any:
         if node.expressions and isinstance(node.expressions[0], a.Star):
             return len(rows)
         vals = [eval_expr(node.expressions[0], engine._env(r)) for r in rows]
-        return sum(1 for v in vals if not is_null(v))
+        vals = [v for v in vals if not is_null(v)]
+        if node.distinct:
+            vals = _dedupe_preserve(vals)
+        return len(vals)
     vals = [eval_expr(node.expressions[0], engine._env(r)) for r in rows]
     vals = [v for v in vals if not is_null(v)]
+    if node.distinct:
+        vals = _dedupe_preserve(vals)
     if name == "sum":
         return sum(vals) if vals else NULL
     if name == "avg":
@@ -658,6 +711,51 @@ def _eval_agg(expr: a.AstNode, rows: list[Row], engine: Engine) -> t.Any:
     if name == "collect":
         return vals
     raise ExecuteError(f"Unknown agg {name}", code="CG1702")
+
+
+def _dedupe_preserve(vals: list[t.Any]) -> list[t.Any]:
+    seen: set[t.Any] = set()
+    out: list[t.Any] = []
+    for v in vals:
+        key = _freeze(v)
+        if key not in seen:
+            seen.add(key)
+            out.append(v)
+    return out
+
+
+def _order_paired(
+    paired: list[tuple[Row, Row]],
+    ordered: a.Ordered,
+    engine: Engine,
+) -> list[tuple[Row, Row]]:
+    """ORDER BY using pre-projection + projected bindings; honor NULLS FIRST/LAST."""
+
+    def _val(orig: Row, proj: Row) -> t.Any:
+        # Projected aliases win; pre-RETURN vars remain visible (Cypher ORDER BY).
+        return eval_expr(ordered.this, engine._env({**orig, **proj}))
+
+    nulls: list[tuple[Row, Row]] = []
+    rest: list[tuple[Row, Row]] = []
+    for orig, proj in paired:
+        val = _val(orig, proj)
+        if is_null(val):
+            nulls.append((orig, proj))
+        else:
+            rest.append((orig, proj))
+
+    rest.sort(
+        key=lambda p: _sort_val(_val(p[0], p[1])),
+        reverse=bool(ordered.desc),
+    )
+
+    nulls_first = (
+        ordered.nulls == "FIRST"
+        or (ordered.nulls is None and ordered.desc)
+    )
+    if nulls_first:
+        return nulls + rest
+    return rest + nulls
 
 
 def _freeze(v: t.Any) -> t.Any:
