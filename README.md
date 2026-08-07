@@ -49,9 +49,17 @@ Full samples: [docs/api.md](docs/api.md). Guides: [docs/](docs/README.md) (AST p
 ```python
 tree = cypherast.parse_one(
     "MATCH (a:Person)-[:KNOWS]->(b) RETURN a.name, b.name",
-    read="opencypher",  # or neo4j / memgraph
+    read="opencypher",  # or neo4j / memgraph / puppygraph
 )
 print(tree.cypher())
+
+# Procedure CALL (openCypher / Neo4j / Memgraph / PuppyGraph algo.*)
+# Distinct from CALL { subquery }. YIELD bindings are in-scope for optimize/validate.
+proc = cypherast.parse_one(
+    "CALL algo.wcc({labels: ['User'], relationshipTypes: ['LINK']}) "
+    "YIELD id, componentId RETURN id, componentId"
+)
+print(proc.cypher())
 ```
 
 ### translate (transpile)
@@ -154,6 +162,10 @@ make translate Q="MATCH (n:Person) RETURN n" FROM=opencypher TO=puppygraph OPT=1
 (labelled MATCH, no Cartesian multi-path MATCH, strip `NULLS FIRST/LAST`, FET-45 null CASE, etc.).
 Does **not** inject `LIMIT` or enforce hop caps (leave those to the engine / query_guard).
 
+Procedure `CALL ns.proc(…) [YIELD …]` parses and renders for all dialects (including PuppyGraph
+`algo.*`). Optimize leaves procedure calls as pass-through; run algorithms on the engine, not
+the in-memory executor.
+
 ```python
 cypherast.optimize(q, write="puppygraph").cypher(dialect="puppygraph")
 cypherast.translate(q, from_="opencypher", to_="puppygraph", optimize=True)
@@ -170,7 +182,7 @@ uv run pytest tests/tck -q
 
 ## Status
 
-v0.1.7 — GraphSchema.strict closed-world labels/rels (CG1301/CG1302).
+v0.1.8 — procedure `CALL` parse/render (`CallProcedure`); YIELD in-scope for strict optimize.
 
 ## CI
 

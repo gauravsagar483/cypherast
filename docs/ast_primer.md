@@ -62,6 +62,14 @@ Common keys:
 
 There is **one** AST vocabulary for all dialects. Dialects differ in parse/render/capabilities, not in a separate node catalog.
 
+Clause highlights:
+
+| Node | Cypher shape |
+|------|----------------|
+| `CallSubquery` | `CALL { MATCH … RETURN … }` |
+| `CallProcedure` | `CALL algo.wcc({…}) YIELD id, componentId` |
+| `Yield` | Field list on a procedure `CALL` (including `YIELD *`) |
+
 Browse types in [`cypherast/ast.py`](../cypherast/ast.py).
 
 ## Traversing
@@ -94,7 +102,7 @@ tree.find_all(a.Property)          # all Property nodes
 
 ### Scope and lineage
 
-`cypherast.scope.build_scope` tracks bindings across `WITH` / `UNWIND` / `UNION`. Binding-level provenance is exposed as `cypherast.lineage(...)`:
+`cypherast.scope.build_scope` tracks bindings across `WITH` / `UNWIND` / `UNION` / procedure `CALL` `YIELD`. Binding-level provenance is exposed as `cypherast.lineage(...)`:
 
 ```python
 node = cypherast.lineage(

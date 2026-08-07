@@ -67,7 +67,7 @@ class Parser:
             elif self._check(TokenKind.FOREACH):
                 clauses.append(self.parse_foreach())
             elif self._check(TokenKind.CALL):
-                clauses.append(self.parse_call_subquery())
+                clauses.append(self.parse_call())
             elif self._check(TokenKind.INSERT):
                 clauses.append(self.parse_insert())
             elif self._check(TokenKind.RETURN):
@@ -283,13 +283,60 @@ class Parser:
         self._expect(TokenKind.RPAREN)
         return a.Foreach(variable=var, expression=expr, clauses=clauses)
 
+    def parse_call(self) -> a.CallSubquery | a.CallProcedure:
+        """Parse ``CALL { … }`` subquery or ``CALL ns.proc(…) [YIELD …]``."""
+        self._expect(TokenKind.CALL)
+        if self._check(TokenKind.LBRACE):
+            return self._parse_call_subquery_body()
+        return self._parse_call_procedure_body()
+
     def parse_call_subquery(self) -> a.CallSubquery:
         """Parse ``CALL { query }`` (Neo4j subquery form; parse-tolerant)."""
         self._expect(TokenKind.CALL)
+        return self._parse_call_subquery_body()
+
+    def _parse_call_subquery_body(self) -> a.CallSubquery:
         self._expect(TokenKind.LBRACE)
         inner = self.parse_statement()
         self._expect(TokenKind.RBRACE)
         return a.CallSubquery(query=inner)
+
+    def _parse_call_procedure_body(self) -> a.CallProcedure:
+        """``ns.proc(args) [YIELD items|*] [WHERE expr]`` (CALL already consumed)."""
+        name = self._parse_procedure_name()
+        self._expect(TokenKind.LPAREN)
+        args: list[a.AstNode] = []
+        if not self._check(TokenKind.RPAREN):
+            args = self.parse_expression_list()
+        self._expect(TokenKind.RPAREN)
+        yield_: a.Yield | None = None
+        where: a.Where | None = None
+        if self._match(TokenKind.YIELD):
+            yield_ = a.Yield(expressions=self._parse_yield_items())
+            if self._match(TokenKind.WHERE):
+                where = a.Where(this=self.parse_expression())
+        return a.CallProcedure(name=name, expressions=args, yield_=yield_, where=where)
+
+    def _parse_procedure_name(self) -> str:
+        parts: list[str] = [self._expect(TokenKind.IDENT).text]
+        while self._match(TokenKind.DOT):
+            parts.append(self._expect(TokenKind.IDENT).text)
+        return ".".join(parts)
+
+    def _parse_yield_items(self) -> list[a.AstNode]:
+        if self._match(TokenKind.STAR):
+            return [a.Star()]
+        items: list[a.AstNode] = []
+        while True:
+            ident = self.parse_variable()
+            if self._match(TokenKind.AS):
+                alias = self.parse_variable()
+                items.append(a.Alias(this=ident, alias=alias))
+            else:
+                items.append(ident)
+            if not self._match(TokenKind.COMMA):
+                break
+        return items
 
     # --- patterns ---------------------------------------------------------
 

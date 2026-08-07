@@ -58,6 +58,19 @@ PuppyGraph subclasses openCypher. On `optimize` / `validate` it typically:
 - Enforcing max hops / rejecting unbounded `*` (query_guard / prevalid)
 - Domain property catalogs without caller `GraphSchema`
 - Inventing endpoint labels by copying the neighbor when schema has no endpoints
+- Running graph algorithms inside `optimize` / in-memory `run` (parse+render only; execute on PuppyGraph)
+
+## Procedure `CALL` (shared)
+
+`CallProcedure` is dialect-shared openCypher surface (Neo4j `db.*` / `dbms.*`, Memgraph MAGE,
+PuppyGraph `algo.*`). Same grammar:
+
+```cypher
+CALL module.procedure(arg, …) YIELD field [AS alias], … [WHERE …]
+```
+
+PuppyGraph examples: `algo.paral.pagerank`, `algo.wcc`, `algo.labelPropagation`. Consumer path:
+parse/optimize → `.cypher()` → engine. No procedure-name catalog in capabilities (YAGNI for now).
 
 ## Pattern predicates
 

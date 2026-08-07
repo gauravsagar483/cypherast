@@ -21,7 +21,8 @@ Cypher text
 | Goal | Start here |
 |------|------------|
 | New AST node / arg | `ast.py`, parser, renderer, tests |
-| Parse edge case | `parser.py` + `tests/test_parse.py` |
+| Parse edge case | `parser.py` + `tests/test_parse.py` / `tests/test_call_procedure.py` |
+| Procedure `CALL` | `CallProcedure` in `ast.py`; parser `parse_call`; renderer; scope/CG1201 |
 | Shared IR rewrite | `optimizer/<pass>.py` + register in `optimizer/catalog.py` |
 | Engine rewrite | `dialects/transforms/` + capability flag + `constraint_rules` |
 | Engine reject | `dialects/validate/` + capability flag |

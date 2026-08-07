@@ -53,6 +53,7 @@ Pipeline order: parse → (optional) optimize/constraints → render / plan / ru
 - Default rules: `qualify` → `canonicalize_patterns` → `simplify` → `pushdown_predicates` → `annotate_types`
 - Opt-in: `OPTIONAL_RULES` includes `merge_match_chains`
 - PuppyGraph: labelled MATCH, FET-45 CASE guard, strip NULLS order; **no** LIMIT inject / hop-cap rewrite
+- Procedure `CALL ns.proc(…) YIELD …` (`CallProcedure`) ≠ `CALL { … }` (`CallSubquery`); parse/render pass-through — do not invent algo rewrites in optimize
 - Schema catalog via `schema=`; `GraphSchema.strict` defaults False
 
 ## How to verify locally (tell authors)

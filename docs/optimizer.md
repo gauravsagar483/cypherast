@@ -94,11 +94,19 @@ cypherast.optimize(q, write="puppygraph", schema=schema)
 cypherast.validate(q, dialect="puppygraph", schema=schema)
 ```
 
+## Procedure `CALL` pass-through
+
+`CallProcedure` is left alone by canonicalizer and constraint rewrites. `YIELD` names are
+treated as in-scope for CG1201 so `optimize(..., write="puppygraph")` can round-trip
+`CALL algo.… YIELD … RETURN …`. Algorithms still run on the target engine — optimize does
+not invoke PuppyGraph / Neo4j / Memgraph procedures.
+
 ## Non-goals (intentionally not rewritten here)
 
 - Injecting `LIMIT` on every row-returning query
 - Capping / rejecting variable-length hop bounds (leave to query_guard / engine)
 - Inventing undeclared domain properties without a caller `GraphSchema`
+- Rewriting MATCH into engine graph-algorithm procedure calls
 
 ## Rule author checklist
 

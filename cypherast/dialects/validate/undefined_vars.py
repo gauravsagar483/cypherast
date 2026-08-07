@@ -142,6 +142,25 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                     scope.add(clause.alias.this)
                 elif isinstance(clause.alias, str):
                     scope.add(clause.alias)
+            elif isinstance(clause, a.CallProcedure):
+                for arg in clause.expressions or []:
+                    for name in _refs(arg):
+                        if name not in scope:
+                            return _issue(name, "Bind procedure arguments before CALL")
+                yielded: set[str] = set()
+                if clause.yield_ is not None:
+                    for expr in clause.yield_.expressions or []:
+                        if isinstance(expr, a.Star):
+                            # YIELD * — unknown field set; do not shrink scope
+                            continue
+                        an = _alias_name(expr)
+                        if an:
+                            yielded.add(an)
+                where_scope = scope | yielded
+                for name in _refs(clause.where):
+                    if name not in where_scope:
+                        return _issue(name, "YIELD the name before WHERE, or bind earlier")
+                scope = scope | yielded
             elif isinstance(clause, a.Set):
                 for item in clause.items or []:
                     for name in _refs(item):

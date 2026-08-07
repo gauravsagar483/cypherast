@@ -12,6 +12,7 @@ alwaysApply: false
 - Dialect capability tests: `tests/test_puppygraph_dialect.py`.
 - Named rule filters: `tests/test_optimizer_rules.py`.
 - Parser/hardening: `tests/test_parse.py`, `tests/test_hardening.py`.
+- Procedure `CALL`: `tests/test_call_procedure.py` (`CallProcedure` vs `CallSubquery`).
 - TCK parse-rate: `tests/tck/` via `make test-tck` — do not treat sample `.feature` files as a full openCypher TCK.
 
 ## Rules

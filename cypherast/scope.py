@@ -95,6 +95,15 @@ def _walk_clause(clause: a.AstNode, scope: Scope) -> Scope:
             if name:
                 scope.define(name, expr)
         return scope
+    if isinstance(clause, a.CallProcedure):
+        if clause.yield_ is not None:
+            for expr in clause.yield_.expressions or []:
+                if isinstance(expr, a.Star):
+                    continue
+                name = _binding_name(expr)
+                if name:
+                    scope.define(name, expr)
+        return scope
     if isinstance(clause, (a.Create, a.Merge, a.Insert)):
         _collect_pattern_vars(clause.pattern, scope)
         return scope

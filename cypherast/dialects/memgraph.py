@@ -19,7 +19,6 @@ class MemgraphRenderer(Renderer):
         a.BindingTable,
         a.ValueTable,
         a.Use,
-        a.Yield,
         a.QuantifiedPath,
     }
 

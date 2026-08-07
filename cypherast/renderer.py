@@ -20,7 +20,6 @@ class Renderer:
         a.BindingTable,
         a.ValueTable,
         a.Use,
-        a.Yield,
         a.QuantifiedPath,
     }
 
@@ -186,6 +185,15 @@ class Renderer:
 
     def render_CallSubquery(self, node: a.CallSubquery) -> str:
         return f"CALL {{ {self.dispatch(node.query)} }}"
+
+    def render_CallProcedure(self, node: a.CallProcedure) -> str:
+        args = ", ".join(self.dispatch(e) for e in (node.expressions or []))
+        s = f"CALL {node.name}({args})"
+        if node.yield_ is not None:
+            s += " " + self.dispatch(node.yield_)
+        if node.where is not None:
+            s += " " + self.dispatch(node.where)
+        return s
 
     def render_Use(self, node: a.Use) -> str:
         return f"USE {self.dispatch(node.graph)}"

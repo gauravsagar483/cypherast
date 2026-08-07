@@ -1,7 +1,7 @@
 # cypherast — agent instructions
 
 Cypher/GQL library: lexer → parser → AST → named rewrite rules → planner → in-memory executor.
-Zero runtime deps. Python **3.11+**. Package version **0.1.7** (`pyproject.toml`). MIT.
+Zero runtime deps. Python **3.11+**. Package version **0.1.8** (`pyproject.toml`). MIT.
 
 Canonical AI instructions live here. Topic rules live under `.agents/rules/` only (no tool-specific stub/rule trees in-repo).
 
@@ -17,7 +17,7 @@ Canonical AI instructions live here. Topic rules live under `.agents/rules/` onl
 
 | Function | Role |
 |----------|------|
-| `parse` / `parse_one` | Cypher → AST (`read=` dialect) |
+| `parse` / `parse_one` | Cypher → AST (`read=` dialect); includes `CALL {…}` and `CALL ns.proc(…) [YIELD …]` |
 | `optimize` | Canonicalizer + write-dialect constraints; **raises** on remaining issues by default (`strict=True`) |
 | `translate` / `transpile` | Parse `from_` → render `to_`; `optimize=True` applies target constraints + validate |
 | `validate` | List capability / schema `ConstraintIssue`s (`schema=` optional) |
@@ -30,7 +30,7 @@ CLI entry: `cypherast.cli:main` (`uv run cypherast …`).
 
 Registered under `cypherast/dialects/`: `opencypher`, `neo4j`, `memgraph`, `puppygraph`.
 `Dialect.optimize` runs `cypherast.optimizer` `RULES` then `constraint_rules(capabilities)`, then raises if `strict` (default).
-PuppyGraph caps are generic engine limits (labelled MATCH, no Cartesian multi-path MATCH, FET-45 CASE guard, etc.) — keep dialect code free of domain-specific label/rel names. Hop caps and missing `LIMIT` are non-goals (query_guard / caller).
+PuppyGraph caps are generic engine limits (labelled MATCH, no Cartesian multi-path MATCH, FET-45 CASE guard, etc.) — keep dialect code free of domain-specific label/rel names. Hop caps and missing `LIMIT` are non-goals (query_guard / caller). Graph algorithms (`algo.*`) = parse/render `CallProcedure` then run on the engine; not optimizer rewrites.
 
 ## Optimizer rules
 

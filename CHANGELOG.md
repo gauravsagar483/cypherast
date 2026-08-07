@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-08-07
+
+### Added
+
+- Parse/render ``CALL ns.proc(args) [YIELD …] [WHERE …]`` (``CallProcedure``):
+  PuppyGraph ``algo.*``, Neo4j ``db.*`` / ``dbms.*``, Memgraph MAGE-style names.
+  ``CALL { … }`` subquery unchanged. YIELD fields (and ``AS`` aliases) are in-scope for
+  CG1201, including ``optimize(..., write="puppygraph", strict=True)`` with map args
+  (refs each arg, not the arg list). No in-memory executor for procedures yet.
+
+### Changed
+
+- ``Yield`` is openCypher-renderable (procedure CALL); removed from renderer
+  unsupported sets (base + Memgraph).
+
 ## [0.1.7] - 2026-08-07
 
 ### Changed
@@ -119,6 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dialects including openCypher and PuppyGraph capability constraints (Cartesian MATCH handling, collect/DISTINCT caps).
 - Named optimizer `Rule` / `RuleSet` with `only` / `disable` / constraint filters.
 
+[0.1.8]: https://github.com/gauravsagar483/cypherast/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/gauravsagar483/cypherast/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/gauravsagar483/cypherast/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/gauravsagar483/cypherast/compare/v0.1.4...v0.1.5

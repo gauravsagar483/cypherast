@@ -30,6 +30,39 @@ stmts = cypherast.parse("RETURN 1")
 
 Dialects: `opencypher` (default), `neo4j`, `memgraph`, `puppygraph`.
 
+### Procedure `CALL` vs subquery `CALL`
+
+Two different clause shapes share the `CALL` keyword:
+
+| Form | AST | Notes |
+|------|-----|--------|
+| `CALL { … }` | `CallSubquery` | Nested query (parse + render; limited exec) |
+| `CALL ns.proc(args) [YIELD …] [WHERE …]` | `CallProcedure` | Procedures / graph algorithms |
+
+```python
+from cypherast import ast as a
+
+# Neo4j / Memgraph catalog procedures
+tree = cypherast.parse_one("CALL db.labels() YIELD label RETURN label")
+assert tree.find(a.CallProcedure).name == "db.labels"
+
+# PuppyGraph graph algorithms (send rendered Cypher to the engine)
+q = """
+CALL algo.paral.pagerank({
+    labels: ['Page'],
+    relationshipTypes: ['LINKS'],
+    maxIterations: 20,
+    dampingFactor: 0.85
+}) YIELD id, score
+RETURN id, score
+"""
+out = cypherast.optimize(q, write="puppygraph", strict=False).cypher()
+# → pass `out` to Bolt / PuppyGraph; in-memory `run()` does not execute procedures
+```
+
+`YIELD` field names (and `AS` aliases) enter binding scope for CG1201. Standalone
+`CALL db.ping()` with no `YIELD` is allowed. `YIELD *` is supported.
+
 ---
 
 ## `translate` / `transpile`

@@ -45,6 +45,7 @@ cypherast.optimize(q, rules=RULES + OPTIONAL_RULES)  # opt-in merge_match_chains
 - `optimize` defaults to `strict=True` (raises on leftover dialect issues); use `strict=False` only when you want a soft AST.
 - Pass `schema=GraphSchema(...)` for id-field checks; with `schema.strict=True` also unknown labels/rels + undeclared props. Without schema those are non-goals.
 - PuppyGraph does not inject `LIMIT` or cap hops — leave that to the engine / query_guard.
+- Procedure `CALL ns.proc(…) YIELD …` (`CallProcedure`) ≠ `CALL { … }` (`CallSubquery`). Parse/render only; do not invent algo rewrites inside `optimize`. Tests: `tests/test_call_procedure.py`.
 - `AstNode.cypher(dialect=...)` for render checks after optimize/translate.
 - Keep `merge_match_chains` out of default `RULES` unless explicitly opting in.
 

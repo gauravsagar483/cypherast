@@ -523,6 +523,17 @@ class CallSubquery(AstNode):
     arg_types = {"query": True, "variables": False}  # optional import vars
 
 
+class CallProcedure(AstNode):
+    """``CALL ns.proc(args) [YIELD …] [WHERE …]`` (openCypher / Neo4j / PuppyGraph / Memgraph)."""
+
+    arg_types = {
+        "name": True,  # dotted procedure name string, e.g. ``algo.wcc``
+        "expressions": True,  # argument list
+        "yield_": False,  # Yield node or None
+        "where": False,  # optional Where after YIELD
+    }
+
+
 class Union(AstNode):
     arg_types = {"this": True, "expression": True, "distinct": False}
 
@@ -581,6 +592,8 @@ class Use(AstNode):
 
 
 class Yield(AstNode):
+    """``YIELD`` field list on a procedure ``CALL`` (also used for ``YIELD *``)."""
+
     arg_types = {"expressions": True}
 
 
