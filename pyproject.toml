@@ -1,6 +1,6 @@
 [project]
 name = "cypherast"
-version = "0.1.4"
+version = "0.1.5"
 description = "Cypher/GQL transpiler, rewriter, planner, and in-memory executor"
 readme = "README.md"
 license = "MIT"

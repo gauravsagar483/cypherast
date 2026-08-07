@@ -18,8 +18,6 @@ from cypherast.errors import (
 from cypherast.lexer import Lexer, Token, TokenKind
 from cypherast.parser import Parser
 
-__version__ = "0.1.3"
-
 
 def parse(cypher: str, read: str | None = None) -> list[ast.AstNode]:
     """Parse one or more Cypher statements. Returns list of top-level AstNodes."""
@@ -230,5 +228,4 @@ __all__ = [
     "transpile",
     "translate",
     "validate",
-    "__version__",
 ]

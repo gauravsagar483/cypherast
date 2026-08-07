@@ -170,7 +170,7 @@ uv run pytest tests/tck -q
 
 ## Status
 
-v0.1.4 — PuppyGraph constraint hardening (labelled nodes, Cartesian, FET-45, scope, list-concat).
+v0.1.5 — Drop module `__version__`; single source is package metadata.
 
 ## CI
 
