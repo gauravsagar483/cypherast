@@ -1,7 +1,7 @@
 # cypherast — agent instructions
 
 Cypher/GQL library: lexer → parser → AST → named rewrite rules → planner → in-memory executor.
-Zero runtime deps. Python **3.11+**. Package version **0.1.6** (`pyproject.toml`). MIT.
+Zero runtime deps. Python **3.11+**. Package version **0.1.7** (`pyproject.toml`). MIT.
 
 Canonical AI instructions live here. Topic rules live under `.agents/rules/` only (no tool-specific stub/rule trees in-repo).
 

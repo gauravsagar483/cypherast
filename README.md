@@ -90,7 +90,7 @@ cypherast.optimize(q, disable=["qualify", "annotate_types"])
 cypherast.optimize(q, write="puppygraph", constraint_disable=["strip_nulls_order_modifiers"])
 cypherast.optimize(q, rules=RULES + OPTIONAL_RULES)  # opt-in merge_match_chains
 
-# optional graph catalog (id fields / undeclared props when schema.strict=True)
+# optional graph catalog (id fields; labels/rels/props when schema.strict=True)
 schema = GraphSchema()
 schema.add_label("Person", name="string")
 schema.add_id_field("DataQualityCheck", "dq_check_id")
@@ -170,7 +170,7 @@ uv run pytest tests/tck -q
 
 ## Status
 
-v0.1.6 — PuppyGraph ET-17 CASE arms; bug-bash executor/parse fixes; dialects transforms/validate layout.
+v0.1.7 — GraphSchema.strict closed-world labels/rels (CG1301/CG1302).
 
 ## CI
 

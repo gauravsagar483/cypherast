@@ -79,16 +79,123 @@ def test_no_schema_skips_property_catalog():
         "MATCH (dq:DataQualityCheck) RETURN dq.dq_check_id",
         dialect="opencypher",
     )
-    assert not any(i.code in {"CG1303", "CG1305"} for i in issues)
+    assert not any(i.code in {"CG1301", "CG1302", "CG1303", "CG1305"} for i in issues)
 
 
-def test_unknown_label_ignored():
+def test_unknown_label_strict():
     schema = _dq_schema()
+    issues = cypherast.validate(
+        "MATCH (m:Metric) RETURN m",
+        schema=schema,
+    )
+    assert any(i.code == "CG1301" for i in issues)
+
+
+def test_unknown_label_non_strict_ok():
+    schema = _dq_schema()
+    schema.strict = False
     issues = cypherast.validate(
         "MATCH (m:Metric) RETURN m.metric_id",
         schema=schema,
     )
-    assert not any(i.code in {"CG1303", "CG1305"} for i in issues)
+    assert not any(i.code in {"CG1301", "CG1302", "CG1303", "CG1305"} for i in issues)
+
+
+def test_unknown_rel_type_strict():
+    s = GraphSchema(strict=True)
+    s.add_label("Person")
+    s.add_rel("KNOWS", "Person", "Person")
+    issues = cypherast.validate(
+        "MATCH (a:Person)-[:KNOZE]->(b:Person) RETURN a",
+        schema=s,
+    )
+    assert any(i.code == "CG1302" for i in issues)
+
+
+def test_unknown_rel_type_non_strict_ok():
+    s = GraphSchema(strict=False)
+    s.add_label("Person")
+    s.add_rel("KNOWS", "Person", "Person")
+    issues = cypherast.validate(
+        "MATCH (a:Person)-[:KNOZE]->(b:Person) RETURN a",
+        schema=s,
+    )
+    assert not any(i.code == "CG1302" for i in issues)
+
+
+def test_known_labels_and_rels_ok():
+    s = GraphSchema(strict=True)
+    s.add_label("Dataset")
+    s.add_label("DimensionColumn")
+    s.add_rel("INCLUDES_DIMENSION_COLUMN", "DimensionColumn", "Dataset")
+    issues = cypherast.validate(
+        "MATCH (dc:DimensionColumn)-[:INCLUDES_DIMENSION_COLUMN]->(ds:Dataset) "
+        "RETURN ds",
+        schema=s,
+    )
+    assert not any(i.code in {"CG1301", "CG1302"} for i in issues)
+
+
+def test_optimize_raises_on_unknown_rel_type():
+    s = GraphSchema(strict=True)
+    s.add_label("Dataset")
+    s.add_label("DimensionColumn")
+    s.add_rel("INCLUDES_DIMENSION_COLUMN", "DimensionColumn", "Dataset")
+    with pytest.raises(ValidationError) as ei:
+        cypherast.optimize(
+            "MATCH (dc:DimensionColumn)-[:INCLUDES_DIMfENSION_COLUMN]->(ds:Dataset) "
+            "RETURN ds LIMIT 1",
+            schema=s,
+        )
+    assert ei.value.code == "CG1302"
+
+
+def test_label_or_half_unknown_strict():
+    s = GraphSchema(strict=True)
+    s.add_label("Person")
+    issues = cypherast.validate(
+        "MATCH (n:Person|Ghost) RETURN n",
+        schema=s,
+    )
+    assert any(i.code == "CG1301" and "Ghost" in i.message for i in issues)
+
+
+def test_rel_or_half_unknown_strict():
+    s = GraphSchema(strict=True)
+    s.add_label("Person")
+    s.add_rel("KNOWS", "Person", "Person")
+    issues = cypherast.validate(
+        "MATCH (a:Person)-[:KNOWS|LIKES]->(b:Person) RETURN a",
+        schema=s,
+    )
+    assert any(i.code == "CG1302" and "LIKES" in i.message for i in issues)
+
+
+def test_remove_unknown_label_strict():
+    s = GraphSchema(strict=True)
+    s.add_label("Person")
+    issues = cypherast.validate(
+        "MATCH (n:Person) REMOVE n:Ghost RETURN n",
+        schema=s,
+    )
+    assert any(i.code == "CG1301" and "Ghost" in i.message for i in issues)
+
+
+def test_puppygraph_default_schema_open_world():
+    """Omitted schema → modern_graph_schema(strict=False) → no CG1301/CG1302."""
+    issues = cypherast.validate(
+        "MATCH (n:Dataset)-[:INCLUDES_DIMENSION_COLUMN]->(m:Metric) RETURN n",
+        dialect="puppygraph",
+        schema=modern_graph_schema(),
+    )
+    assert not any(i.code in {"CG1301", "CG1302"} for i in issues)
+    # optimize without caller schema also stays open-world for labels
+    tree = cypherast.optimize(
+        "MATCH (n:Dataset) RETURN n LIMIT 1",
+        write="puppygraph",
+        strict=False,
+    )
+    assert tree is not None
 
 
 def test_optimize_raises_on_id_field():

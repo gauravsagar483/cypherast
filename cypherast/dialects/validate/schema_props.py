@@ -1,10 +1,97 @@
-"""Validate: schema property / id-field access."""
+"""Validate: schema catalog (labels, rel types, properties, id-fields)."""
 
 from __future__ import annotations
 
 from cypherast import ast as a
 from cypherast.dialects.validate.issues import ConstraintIssue
 from cypherast.schema import GraphSchema
+
+
+def _atomic_from_label_expr(labels: object | None) -> list[str]:
+    """Flatten a ``LabelExpression`` into atomic names (split ``a|b``)."""
+    raw: list[str] = []
+    if isinstance(labels, a.LabelExpression):
+        if labels.expression:
+            raw.append(str(labels.expression))
+        else:
+            raw.extend(str(x) for x in (labels.labels or []))
+    out: list[str] = []
+    for item in raw:
+        for part in str(item).split("|"):
+            name = part.strip()
+            # Skip complex Neo4j label ops (!, &, %) — closed-world is for plain names
+            if name and not any(c in name for c in "!&%"):
+                out.append(name)
+    return out
+
+
+def _atomic_label_names(n: a.NodePattern) -> list[str]:
+    return _atomic_from_label_expr(n.labels)
+
+
+def _note_unknown_label(
+    lab: str,
+    *,
+    seen: set[str],
+    schema: GraphSchema,
+    issues: list[ConstraintIssue],
+) -> None:
+    if lab in seen:
+        return
+    seen.add(lab)
+    if not schema.has_label(lab):
+        issues.append(
+            ConstraintIssue(
+                "CG1301",
+                f"Unknown label `{lab}`",
+                hint="Declare it on GraphSchema or fix the label name",
+            )
+        )
+
+
+def _schema_unknown_types(
+    tree: a.AstNode, schema: GraphSchema
+) -> list[ConstraintIssue]:
+    """Closed-world label / rel-type check when ``schema.strict``.
+
+    ``schema is None`` callers never reach here. Non-strict schemas keep
+    open-world ignore (PuppyGraph tutorial default).
+    """
+    if not schema.strict:
+        return []
+
+    seen_labels: set[str] = set()
+    seen_rels: set[str] = set()
+    issues: list[ConstraintIssue] = []
+
+    for n in tree.find_all(a.NodePattern):
+        assert isinstance(n, a.NodePattern)
+        for lab in _atomic_label_names(n):
+            _note_unknown_label(lab, seen=seen_labels, schema=schema, issues=issues)
+
+    for n in tree.find_all(a.RemoveLabels):
+        assert isinstance(n, a.RemoveLabels)
+        for lab in _atomic_from_label_expr(n.labels):
+            _note_unknown_label(lab, seen=seen_labels, schema=schema, issues=issues)
+
+    for n in tree.find_all(a.RelationshipPattern):
+        assert isinstance(n, a.RelationshipPattern)
+        for rt in (str(t) for t in (n.types or []) if t):
+            # Rel type OR may appear as single "A|B" or separate list entries
+            for part in rt.split("|"):
+                name = part.strip()
+                if not name or name in seen_rels:
+                    continue
+                seen_rels.add(name)
+                if not schema.has_rel(name):
+                    issues.append(
+                        ConstraintIssue(
+                            "CG1302",
+                            f"Unknown relationship type `{name}`",
+                            hint="Declare it on GraphSchema or fix the type name",
+                        )
+                    )
+    return issues
 
 
 def _schema_property_access(
@@ -14,15 +101,11 @@ def _schema_property_access(
 
     Id-field markers always reject (``n.id_col`` → use ``id(n)``). Undeclared
     properties reject only when ``schema.strict`` and the label/rel is in schema.
-    Unknown labels/types are ignored (no invented domain vocabulary).
+    Unknown labels/types: see ``_schema_unknown_types`` (strict closed-world).
     """
 
     def _label_names(n: a.NodePattern) -> list[str]:
-        if isinstance(n.labels, a.LabelExpression):
-            if n.labels.expression:
-                return [str(n.labels.expression)]
-            return [str(x) for x in (n.labels.labels or [])]
-        return []
+        return _atomic_label_names(n)
 
     def _alias_name(expr: a.AstNode) -> str | None:
         if isinstance(expr, a.Alias):

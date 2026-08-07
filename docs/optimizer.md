@@ -74,9 +74,13 @@ Pass `schema=GraphSchema(...)` into `optimize` / `validate`:
 
 - Labelling help for `ensure_labelled_nodes`
 - **CG1305** if an `id_field` is used as `n.prop`
-- **CG1303** for undeclared props on *known* labels only when `schema.strict=True`
+- When `schema.strict=True` (closed-world):
+  - **CG1301** unknown node labels
+  - **CG1302** unknown relationship types
+  - **CG1303** undeclared props on *known* labels/rels
 
-`GraphSchema.strict` defaults to **False**. Without a caller schema, domain property catalogs are a non-goal.
+`GraphSchema.strict` defaults to **False** (open-world for unknown names). Without a
+caller schema, domain catalogs are a non-goal.
 
 ```python
 from cypherast.schema import GraphSchema
@@ -84,7 +88,7 @@ from cypherast.schema import GraphSchema
 schema = GraphSchema()
 schema.add_label("Person", name="string")
 schema.add_id_field("DataQualityCheck", "dq_check_id")
-# schema.strict = True  # opt into undeclared-prop rejection
+# schema.strict = True  # closed-world labels/rels + undeclared props
 
 cypherast.optimize(q, write="puppygraph", schema=schema)
 cypherast.validate(q, dialect="puppygraph", schema=schema)

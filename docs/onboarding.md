@@ -57,7 +57,7 @@ Prefer a minimal Cypher string that reproduces the bug before large refactors.
 | Expecting LIMIT injection on PuppyGraph optimize | Removed in 0.1.2 — caller/engine owns LIMIT |
 | Expecting hop-cap rejection in cypherast | Non-goal; query_guard / prevalid |
 | `optimize` “just returns AST” for invalid dialect queries | Default `strict=True` raises `ValidationError` |
-| Undeclared props failing without schema | Non-goal unless caller passes `GraphSchema` (and often `strict=True`) |
+| Undeclared props / unknown labels failing without schema | Non-goal unless caller passes `GraphSchema` (and often `strict=True`) |
 
 ## Reading order
 

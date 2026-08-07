@@ -21,7 +21,10 @@ from cypherast.dialects.validate.list_ops import (
 from cypherast.dialects.validate.nulls_order import _nulls_order_modifiers
 from cypherast.dialects.validate.optional_scalar import _unguarded_optional_scalar_use
 from cypherast.dialects.validate.pattern_predicates import _pattern_predicate_bindings
-from cypherast.dialects.validate.schema_props import _schema_property_access
+from cypherast.dialects.validate.schema_props import (
+    _schema_property_access,
+    _schema_unknown_types,
+)
 from cypherast.dialects.validate.undefined_vars import _undefined_variables
 from cypherast.dialects.validate.union_columns import _union_column_mismatch
 from cypherast.dialects.validate.unlabelled import _unlabelled_nodes
@@ -41,9 +44,9 @@ def validate_capabilities(
     Prefer ``optimize(..., write=dialect)`` then ``validate`` — raw validate
     may still flag constructs optimize rewrites (e.g. Cartesian MATCH).
 
-    When ``schema`` is a ``GraphSchema``, also checks property access against
-    declared labels/rel types (id-fields → CG1305; undeclared props when
-    ``schema.strict`` → CG1303).
+    When ``schema`` is a ``GraphSchema``, also checks the catalog:
+    id-fields → CG1305; when ``schema.strict``, unknown labels → CG1301,
+    unknown rel types → CG1302, undeclared props → CG1303.
     """
     issues: list[ConstraintIssue] = []
     if caps.require_labelled_nodes:
@@ -108,6 +111,7 @@ def validate_capabilities(
         issues.extend(_pattern_predicate_bindings(tree))
     gs = ensure_schema(schema)
     if gs is not None:
+        issues.extend(_schema_unknown_types(tree, gs))
         issues.extend(_schema_property_access(tree, gs))
     return issues
 

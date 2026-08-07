@@ -44,17 +44,19 @@ class GraphSchema:
     """In-memory graph catalog: labels, rel types, properties, optional stats.
 
     When passed to ``optimize`` / ``validate``:
-    - undeclared properties on known labels are rejected (if ``strict``)
     - ``id_field`` properties are rejected (use ``id(n)`` / ``elementId(n)``)
-    - unknown labels are ignored (no invented domain vocabulary)
+    - when ``strict``: unknown labels (CG1301), unknown rel types (CG1302),
+      and undeclared properties on known labels/rels (CG1303)
+    - when not ``strict``: unknown labels/types ignored (open-world)
     """
 
     labels: dict[str, LabelDef] = field(default_factory=dict)
     rel_types: dict[str, RelTypeDef] = field(default_factory=dict)
     indexes: list[IndexDef] = field(default_factory=list)
     stats: dict[str, float] = field(default_factory=dict)  # cardinality hints
-    # When True, property access on a known label must be declared (or id_field).
-    # Default False: without a catalog intent, undeclared props are not blocked.
+    # When True: closed-world catalog — unknown labels/rel types + undeclared
+    # props on known names are rejected. Default False keeps open-world ignore
+    # for unknown names (PuppyGraph tutorial schema stays non-strict).
     strict: bool = False
 
     def add_label(self, label: str, **props: str) -> None:

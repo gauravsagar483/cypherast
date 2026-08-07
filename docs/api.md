@@ -91,11 +91,11 @@ cypherast.optimize(q, rules=RULES + OPTIONAL_RULES)
 Optional schema (catalog for labels, rel types, properties, id fields):
 
 ```python
-schema = GraphSchema()  # strict=False by default — no undeclared-prop blocks
+schema = GraphSchema()  # strict=False by default — open-world unknown names
 schema.add_label("Person", name="string", age="integer")
 schema.add_id_field("DataQualityCheck", "dq_check_id")
 schema.add_label("DataQualityCheck", status="string")
-# Opt into undeclared-property rejection:
+# Closed-world: CG1301/CG1302 unknown labels/rels + CG1303 undeclared props
 # schema.strict = True
 
 cypherast.optimize("MATCH (n:Person) RETURN n", schema=schema)

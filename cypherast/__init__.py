@@ -58,7 +58,7 @@ def optimize(
     get a rewritten AST that may still be invalid for the target engine.
 
     Pass ``schema=GraphSchema(...)`` for labelling + catalog checks
-    (id-fields / undeclared props on known labels).
+    (id-fields; when ``schema.strict``, unknown labels/rels + undeclared props).
     """
     from cypherast.dialects.dialect import get_dialect_cls
 
@@ -137,8 +137,8 @@ def validate(
     ``optimize(..., write=dialect)`` already raises on these issues by default.
     Use ``validate`` to inspect without rewriting, or after ``optimize(..., strict=False)``.
 
-    Pass ``schema=GraphSchema(...)`` to reject id-field property access and
-    (when ``schema.strict``) undeclared properties on known labels/rel types.
+    Pass ``schema=GraphSchema(...)`` to reject id-field property access and,
+    when ``schema.strict``, unknown labels/rel types and undeclared properties.
     """
     from cypherast.dialects.dialect import get_dialect_cls
 

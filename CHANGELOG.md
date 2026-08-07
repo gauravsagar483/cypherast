@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-08-07
+
+### Changed
+
+- ``GraphSchema.strict=True`` is closed-world: unknown node labels → **CG1301**,
+  unknown relationship types → **CG1302** (plus existing undeclared props → CG1303).
+  Also checks ``REMOVE n:Label``. ``strict=False`` / ``schema=None`` keep open-world
+  ignore for unknown names (PuppyGraph tutorial default stays non-strict).
+
 ## [0.1.6] - 2026-08-07
 
 ### Fixed
@@ -110,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dialects including openCypher and PuppyGraph capability constraints (Cartesian MATCH handling, collect/DISTINCT caps).
 - Named optimizer `Rule` / `RuleSet` with `only` / `disable` / constraint filters.
 
+[0.1.7]: https://github.com/gauravsagar483/cypherast/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/gauravsagar483/cypherast/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/gauravsagar483/cypherast/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/gauravsagar483/cypherast/compare/v0.1.3...v0.1.4
