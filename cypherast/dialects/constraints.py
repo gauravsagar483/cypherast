@@ -302,7 +302,7 @@ def ensure_labelled_nodes(
             n.variable = a.Identifier(this=_name())
         return True
 
-    def _rel_def(tname: str):
+    def _rel_def(tname: str) -> RelTypeDef | None:
         rd = gs.rel_types.get(tname) or gs.rel_types.get(tname.lower())
         if rd is not None:
             return rd
@@ -311,7 +311,7 @@ def ensure_labelled_nodes(
                 return v
         return None
 
-    def _ensure_rel(tname: str):
+    def _ensure_rel(tname: str) -> RelTypeDef:
         rd = _rel_def(tname)
         if rd is not None:
             return rd
@@ -710,7 +710,7 @@ def _unlabelled_nodes(tree: a.AstNode) -> list[ConstraintIssue]:
     def _alias_name(expr: a.AstNode) -> str | None:
         if isinstance(expr, a.Alias):
             if isinstance(expr.alias, a.Identifier):
-                return expr.alias.this
+                return str(expr.alias.this)
             if isinstance(expr.alias, str):
                 return expr.alias
         return None
@@ -938,6 +938,7 @@ def _list_concat_ops(tree: a.AstNode) -> list[ConstraintIssue]:
         return _scan_query(root)
     if isinstance(root, a.Union):
         for q in root.find_all(a.Query):
+            assert isinstance(q, a.Query)
             issues = _scan_query(q)
             if issues:
                 return issues
@@ -1140,23 +1141,19 @@ def _return_column_names(ret: a.Return) -> list[str]:
     return names
 
 
+def _union_leaf_branches(node: a.AstNode) -> list[a.AstNode]:
+    if isinstance(node, a.Union):
+        return _union_leaf_branches(node.this) + _union_leaf_branches(node.expression)
+    return [node]
+
+
 def _union_column_mismatch(tree: a.AstNode) -> list[ConstraintIssue]:
     root = tree.this if isinstance(tree, a.Cypher) else tree
     unions = [root] if isinstance(root, a.Union) else list(tree.find_all(a.Union))
     for u in unions:
         assert isinstance(u, a.Union)
-        branches: list[a.AstNode] = []
-
-        def _collect(node: a.AstNode) -> None:
-            if isinstance(node, a.Union):
-                _collect(node.this)
-                _collect(node.expression)
-            else:
-                branches.append(node)
-
-        _collect(u)
         cols: list[list[str]] | None = None
-        for br in branches:
+        for br in _union_leaf_branches(u):
             q = br.this if isinstance(br, a.Cypher) else br
             if not isinstance(q, a.Query):
                 continue
@@ -1183,11 +1180,11 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
     def _alias_name(expr: a.AstNode) -> str | None:
         if isinstance(expr, a.Alias):
             if isinstance(expr.alias, a.Identifier):
-                return expr.alias.this
+                return str(expr.alias.this)
             if isinstance(expr.alias, str):
                 return expr.alias
         if isinstance(expr, a.Identifier):
-            return expr.this
+            return str(expr.this)
         return None
 
     def _add_pattern_vars(pattern: a.AstNode | None, scope: set[str]) -> None:
@@ -1339,6 +1336,7 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
     if isinstance(root, a.Union):
         issues: list[ConstraintIssue] = []
         for q in root.find_all(a.Query):
+            assert isinstance(q, a.Query)
             issues.extend(_check_query(q))
             if issues:
                 return issues
@@ -1426,11 +1424,11 @@ def _schema_property_access(
     def _alias_name(expr: a.AstNode) -> str | None:
         if isinstance(expr, a.Alias):
             if isinstance(expr.alias, a.Identifier):
-                return expr.alias.this
+                return str(expr.alias.this)
             if isinstance(expr.alias, str):
                 return expr.alias
         if isinstance(expr, a.Identifier):
-            return expr.this
+            return str(expr.this)
         return None
 
     def _bind_pattern(
@@ -1669,6 +1667,7 @@ def _pattern_predicate_bindings(tree: a.AstNode) -> list[ConstraintIssue]:
         return _check_query(root)
     if isinstance(root, a.Union):
         for q in root.find_all(a.Query):
+            assert isinstance(q, a.Query)
             issues = _check_query(q)
             if issues:
                 return issues
