@@ -4,10 +4,24 @@
 
 ```bash
 uv sync --group dev
+make pre-commit-install   # git hook: ruff check + pytest on every commit
 make check
 ```
 
 Requires Python 3.11+ (`requires-python` in `pyproject.toml`).
+
+### Pre-commit
+
+Configured in `.pre-commit-config.yaml` (local hooks via `uv run`):
+
+- `ruff check .`
+- `pytest`
+
+```bash
+make pre-commit-install
+make pre-commit-run          # run hooks without committing
+# or: uv run pre-commit run --all-files
+```
 
 ## Workflow
 

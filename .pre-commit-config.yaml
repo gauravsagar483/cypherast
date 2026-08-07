@@ -1,0 +1,20 @@
+# Local hooks — use project uv/ruff/pytest versions (no pinned remote rev drift).
+# Install: uv sync --group dev && uv run pre-commit install
+# Run all: uv run pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check
+        entry: uv run ruff check .
+        language: system
+        pass_filenames: false
+        always_run: true
+        files: \.py$
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]

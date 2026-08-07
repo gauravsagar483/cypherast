@@ -22,6 +22,7 @@ CONSTRAINT_ONLY ?=
 .PHONY: help sync install clean build dist \
 	test test-cov test-tck test-puppy \
 	lint fmt typecheck check \
+	pre-commit-install pre-commit-run \
 	parse optimize validate translate explain run \
 	ci
 
@@ -77,6 +78,12 @@ typecheck: ## mypy strict
 	$(UV) run mypy $(PKG)
 
 check: lint typecheck test ## lint + mypy + test
+
+pre-commit-install: ## Install git hooks (ruff + pytest on commit)
+	$(UV) run pre-commit install
+
+pre-commit-run: ## Run pre-commit hooks on all files
+	$(UV) run pre-commit run --all-files
 
 ci: sync check ## Full local CI: sync + check
 

@@ -42,6 +42,7 @@ PuppyGraph caps are generic engine limits (labelled MATCH, no Cartesian multi-pa
 
 ```bash
 uv sync --group dev
+make pre-commit-install   # git hook: ruff + pytest on commit
 make check          # ruff + mypy + pytest
 make test
 make test-puppy

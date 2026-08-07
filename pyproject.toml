@@ -37,6 +37,7 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.9",
   "mypy>=1.14",
+  "pre-commit>=4.0",
 ]
 
 [build-system]
@@ -85,4 +86,5 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.9",
   "mypy>=1.14",
+  "pre-commit>=4.0",
 ]
