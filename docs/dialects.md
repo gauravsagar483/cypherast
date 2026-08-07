@@ -40,11 +40,13 @@ PuppyGraph subclasses openCypher. On `optimize` / `validate` it typically:
 
 | Behavior | Notes |
 |----------|--------|
-| Require labelled MATCH nodes | `ensure_labelled_nodes` + CG1402 |
-| Reject Cartesian multi-path MATCH | No silent split rewrite |
+| Require labelled MATCH nodes | `ensure_labelled_nodes` + CG1402 (schema/mined endpoints; no neighbor-label invent) |
+| Reject true Cartesians | Disjoint multi-path MATCH; adjacent consecutive MATCH with no shared vars |
+| Allow connected multi-path | e.g. `MATCH (a), (a)-[:R]->(b)` |
 | Reject APT-18 / TE-14 / DISTINCT+agg landmines | Reject, don’t greenwash |
 | Strip `NULLS FIRST/LAST` | Rewrite |
-| Guard OPTIONAL `id()`/`split`/… | FET-45 CASE rewrite |
+| Guard OPTIONAL `id()`/`split`/… | FET-45 CASE rewrite; `id(var) IS NOT NULL` counts; OR does not |
+| Undefined vars | **CG1201** (`WITH *`, SET/DELETE/REMOVE, comprehension binders) |
 | Default tutorial schema when `schema=` omitted | Labelling only (`strict=False`) |
 
 **Non-goals for PuppyGraph in cypherast:**
@@ -52,6 +54,7 @@ PuppyGraph subclasses openCypher. On `optimize` / `validate` it typically:
 - Injecting `LIMIT`
 - Enforcing max hops / rejecting unbounded `*` (query_guard / prevalid)
 - Domain property catalogs without caller `GraphSchema`
+- Inventing endpoint labels by copying the neighbor when schema has no endpoints
 
 ## Pattern predicates
 

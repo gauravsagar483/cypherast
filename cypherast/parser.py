@@ -385,7 +385,23 @@ class Parser:
         return a.NodePattern(variable=variable, labels=labels, properties=properties)
 
     def _parse_labels(self) -> a.LabelExpression:
+        """Parse ``:A:B`` (AND) or ``:A|B`` (OR expression)."""
         labels: list[str] = []
+        if not self._match(TokenKind.COLON):
+            return a.LabelExpression(labels=[])
+        if not self._check(TokenKind.IDENT):
+            raise self._err("Expected label name", code="CG1104")
+        first = self._advance().text
+        if self._match(TokenKind.PIPE):
+            parts = [first]
+            while True:
+                if not self._check(TokenKind.IDENT):
+                    raise self._err("Expected label name after |", code="CG1104")
+                parts.append(self._advance().text)
+                if not self._match(TokenKind.PIPE):
+                    break
+            return a.LabelExpression(labels=[], expression="|".join(parts))
+        labels.append(first)
         while self._match(TokenKind.COLON):
             if not self._check(TokenKind.IDENT):
                 raise self._err("Expected label name", code="CG1104")

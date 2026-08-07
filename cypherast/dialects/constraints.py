@@ -6,6 +6,7 @@ Callers pass a ``DialectCapabilities`` snapshot. Label names come from
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 
 from cypherast import ast as a
@@ -267,7 +268,15 @@ def ensure_labelled_nodes(
             endpoints=list(rd.endpoints),
         )
 
-    counter = {"n": 0}
+    # Avoid colliding with names qualify() already minted (_n_1, …).
+    used_n = 0
+    for ident in tree.find_all(a.Identifier):
+        assert isinstance(ident, a.Identifier)
+        text = str(ident.this or "")
+        if text.startswith("_n_"):
+            with contextlib.suppress(ValueError):
+                used_n = max(used_n, int(text[3:]))
+    counter = {"n": used_n}
     # Labels already bound to a variable in an earlier MATCH — reuse sites must
     # keep that label (never copy a neighbor's label onto a prior-bound var).
     var_labels: dict[str, set[str]] = {}
@@ -446,24 +455,10 @@ def ensure_labelled_nodes(
                     changed |= _apply_labels(left, one)
                     changed |= _apply_labels(right, one)
 
-            # Fallback when schema/mining had no endpoints: copy labels from the
-            # labelled neighbor so PuppyGraph gets a labelled pattern instead of
-            # CG1402 (e.g. (a:Metric)-[:DERIVED_FROM]->(b) → (b:Metric)).
-            # Never stamp a neighbor label onto a var already bound earlier —
-            # that rewrote (dl:DataLakeTables)…(dl)-[:R]->(dq:DQ) into
-            # (dl:DataQualityCheck) and broke the hop.
-            left_labs = {x for x in _existing_labels(left) if "|" not in x}
-            right_labs = {x for x in _existing_labels(right) if "|" not in x}
-            right_vn = _var_name(right)
-            left_vn = _var_name(left)
-            if not _existing_labels(right) and left_labs and (
-                right_vn is None or right_vn not in var_labels
-            ):
-                changed |= _apply_labels(right, left_labs)
-            if not _existing_labels(left) and right_labs and (
-                left_vn is None or left_vn not in var_labels
-            ):
-                changed |= _apply_labels(left, right_labs)
+            # No neighbor-label copy fallback: inventing the other end's label from
+            # the adjacent node greenwashes heterogeneous edges (e.g. Software-
+            # [:CREATED_BY]->(b) → (b:Software)). Prefer CG1402 unless schema /
+            # mined endpoints can infer a real label.
             i += 2
         return changed
 
@@ -570,7 +565,7 @@ def _optional_var_guarded(node: a.AstNode, var: str) -> bool:
     """True if ``node`` subtree has ``var IS NOT NULL`` or ``CASE WHEN var IS NULL``."""
     for n in node.find_all(a.IsNull):
         assert isinstance(n, a.IsNull)
-        if n.not_ and isinstance(n.this, a.Identifier) and n.this.this == var:
+        if _is_not_null_guard_for_var(n, var):
             return True
     for case in node.find_all(a.Case):
         assert isinstance(case, a.Case)
@@ -602,21 +597,43 @@ def _call_under_null_case_guard(call: a.AstNode, var: str) -> bool:
     return False
 
 
+def _is_not_null_guard_for_var(n: a.IsNull, var: str) -> bool:
+    """True if ``n`` is ``var IS NOT NULL`` or ``id(var)/elementId(var) IS NOT NULL``."""
+    if not n.not_:
+        return False
+    if isinstance(n.this, a.Identifier) and n.this.this == var:
+        return True
+    if (
+        isinstance(n.this, a.FunctionCall)
+        and str(n.this.name).lower() in {"id", "elementid"}
+    ):
+        for arg in n.this.expressions or []:
+            if isinstance(arg, a.Identifier) and arg.this == var:
+                return True
+    return False
+
+
 def _where_is_not_null_guard(tree: a.AstNode, var: str) -> bool:
-    """True if some ``WHERE`` contains ``var IS NOT NULL``."""
+    """True if a filtering WHERE requires ``var`` (or id(var)) IS NOT NULL.
+
+    Disjunctive guards (``… OR …``) do not count — they do not force null exclusion.
+    """
     for n in tree.find_all(a.IsNull):
         assert isinstance(n, a.IsNull)
-        if not (
-            n.not_
-            and isinstance(n.this, a.Identifier)
-            and n.this.this == var
-        ):
+        if not _is_not_null_guard_for_var(n, var):
             continue
-        p: a.AstNode | None = n
+        p: a.AstNode | None = n.parent
+        ok = False
         while p is not None:
+            if isinstance(p, (a.Or, a.Xor)):
+                ok = False
+                break
             if isinstance(p, a.Where):
-                return True
+                ok = True
+                break
             p = p.parent
+        if ok:
+            return True
     return False
 
 
@@ -773,6 +790,9 @@ def _unlabelled_nodes(tree: a.AstNode) -> list[ConstraintIssue]:
 
     def _apply_with(clause: a.With) -> None:
         nonlocal labelled, node_lists
+        if any(isinstance(expr, a.Star) for expr in (clause.expressions or [])):
+            # WITH * keeps prior labelled / list bindings
+            return
         nxt: set[str] = set()
         nxt_lists: set[str] = set()
         for expr in clause.expressions or []:
@@ -829,18 +849,93 @@ def _unlabelled_nodes(tree: a.AstNode) -> list[ConstraintIssue]:
 
 
 def _cartesian_matches(tree: a.AstNode) -> list[ConstraintIssue]:
+    """Reject true Cartesians: disjoint multi-path MATCH or consecutive MATCH.
+
+    Connected multi-path (shared variables) and consecutive MATCH that reuse
+    prior bindings are allowed.
+    """
+
+    def _path_vars(path: a.PathPattern) -> set[str]:
+        out: set[str] = set()
+        for n in path.walk():
+            if isinstance(n, (a.NodePattern, a.RelationshipPattern)) and isinstance(
+                n.variable, a.Identifier
+            ):
+                out.add(n.variable.this)
+        return out
+
+    def _pattern_vars(pattern: a.AstNode | None) -> set[str]:
+        out: set[str] = set()
+        if not isinstance(pattern, a.Pattern):
+            return out
+        for path in pattern.paths or []:
+            if isinstance(path, a.PathPattern):
+                out |= _path_vars(path)
+        return out
+
     issues: list[ConstraintIssue] = []
+
+    # 1) Multi-path in one MATCH — only when no shared vars across paths
     for n in tree.find_all(a.Match):
         assert isinstance(n, a.Match)
-        if isinstance(n.pattern, a.Pattern) and len(n.pattern.paths or []) > 1:
+        if not isinstance(n.pattern, a.Pattern):
+            continue
+        paths = [p for p in (n.pattern.paths or []) if isinstance(p, a.PathPattern)]
+        if len(paths) <= 1:
+            continue
+        shared: set[str] | None = None
+        disjoint = False
+        acc: set[str] = set()
+        for path in paths:
+            pv = _path_vars(path)
+            if shared is None:
+                shared = set(pv)
+                acc = set(pv)
+                continue
+            if not (pv & acc):
+                disjoint = True
+                break
+            acc |= pv
+        if disjoint:
             issues.append(
                 ConstraintIssue(
                     "CG1401",
                     "Multiple paths in one MATCH are rejected (Cartesian risk)",
-                    hint="Split into consecutive MATCH clauses sharing variables",
+                    hint="Connect paths with shared variables or split carefully",
                 )
             )
-            break
+            return issues
+
+    # 2) Adjacent required MATCH (no WITH/UNWIND between) with no shared vars
+    root = tree.this if isinstance(tree, a.Cypher) else tree
+    queries = [root] if isinstance(root, a.Query) else list(tree.find_all(a.Query))
+    for q in queries:
+        assert isinstance(q, a.Query)
+        prev_vars: set[str] | None = None
+        for clause in q.clauses or []:
+            if isinstance(clause, a.Match) and not clause.optional:
+                here = _pattern_vars(clause.pattern)
+                if (
+                    prev_vars is not None
+                    and here
+                    and not (here & prev_vars)
+                ):
+                    issues.append(
+                        ConstraintIssue(
+                            "CG1401",
+                            "Consecutive MATCH clauses with no shared variables "
+                            "are rejected (Cartesian risk)",
+                            hint="Share a variable between MATCH clauses or combine patterns",
+                        )
+                    )
+                    return issues
+                prev_vars = here if prev_vars is None else (prev_vars | here)
+            elif isinstance(
+                clause,
+                (a.With, a.Unwind, a.Create, a.Merge, a.Set, a.Delete, a.Remove),
+            ):
+                # Projection / write breaks adjacency for Cartesian detection
+                prev_vars = None
     return issues
 
 
@@ -919,6 +1014,30 @@ def _list_concat_ops(tree: a.AstNode) -> list[ConstraintIssue]:
             else:
                 list_aliases.discard(alias)
 
+    def _adds_in(node: a.AstNode | None) -> list[a.Add]:
+        if node is None:
+            return []
+        found: list[a.Add] = []
+        if isinstance(node, a.Add):
+            found.append(node)
+        if hasattr(node, "find_all"):
+            for add in node.find_all(a.Add):
+                assert isinstance(add, a.Add)
+                found.append(add)
+        return found
+
+    def _flag_list_adds(node: a.AstNode | None) -> list[ConstraintIssue] | None:
+        for add in _adds_in(node):
+            if _list_producing(add.this) or _list_producing(add.expression):
+                return [
+                    ConstraintIssue(
+                        "CG1401",
+                        "List concatenation (+) is not supported by this dialect",
+                        hint="Avoid list + list; project with UNWIND / collect instead",
+                    )
+                ]
+        return None
+
     def _scan_query(q: a.Query) -> list[ConstraintIssue]:
         nonlocal list_aliases
         list_aliases = set()
@@ -926,44 +1045,40 @@ def _list_concat_ops(tree: a.AstNode) -> list[ConstraintIssue]:
             if isinstance(clause, a.With):
                 for expr in clause.expressions or []:
                     core = expr.this if isinstance(expr, a.Alias) else expr
-                    for add in core.find_all(a.Add) if hasattr(core, "find_all") else []:
-                        assert isinstance(add, a.Add)
-                        if _list_producing(add.this) or _list_producing(add.expression):
-                            return [
-                                ConstraintIssue(
-                                    "CG1401",
-                                    "List concatenation (+) is not supported by this dialect",
-                                    hint="Avoid list + list; project with UNWIND / collect instead",
-                                )
-                            ]
-                    # also top-level Add
-                    if isinstance(core, a.Add) and (
-                        _list_producing(core.this) or _list_producing(core.expression)
-                    ):
-                        return [
-                            ConstraintIssue(
-                                "CG1401",
-                                "List concatenation (+) is not supported by this dialect",
-                                hint="Avoid list + list; project with UNWIND / collect instead",
-                            )
-                        ]
+                    hit = _flag_list_adds(core)
+                    if hit:
+                        return hit
+                hit = _flag_list_adds(clause.where)
+                if hit:
+                    return hit
+                for sub in (clause.order, clause.skip, clause.limit):
+                    hit = _flag_list_adds(sub)
+                    if hit:
+                        return hit
                 _note_projection(clause.expressions)
             elif isinstance(clause, a.Return):
                 for expr in clause.expressions or []:
                     core = expr.this if isinstance(expr, a.Alias) else expr
-                    nodes = [core] if isinstance(core, a.Add) else []
-                    if hasattr(core, "find_all"):
-                        nodes.extend(core.find_all(a.Add))
-                    for add in nodes:
-                        assert isinstance(add, a.Add)
-                        if _list_producing(add.this) or _list_producing(add.expression):
-                            return [
-                                ConstraintIssue(
-                                    "CG1401",
-                                    "List concatenation (+) is not supported by this dialect",
-                                    hint="Avoid list + list; project with UNWIND / collect instead",
-                                )
-                            ]
+                    hit = _flag_list_adds(core)
+                    if hit:
+                        return hit
+                for sub in (clause.order, clause.skip, clause.limit):
+                    hit = _flag_list_adds(sub)
+                    if hit:
+                        return hit
+            elif isinstance(clause, a.Match):
+                hit = _flag_list_adds(clause.where)
+                if hit:
+                    return hit
+            elif isinstance(clause, a.Unwind):
+                hit = _flag_list_adds(clause.expression)
+                if hit:
+                    return hit
+            elif isinstance(clause, a.Set):
+                for item in clause.items or []:
+                    hit = _flag_list_adds(item)
+                    if hit:
+                        return hit
         return []
 
     root = tree.this if isinstance(tree, a.Cypher) else tree
@@ -1208,7 +1323,16 @@ def _union_column_mismatch(tree: a.AstNode) -> list[ConstraintIssue]:
 
 
 def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
-    """Flag identifiers used after WITH without being projected (e.g. ET-17 scope)."""
+    """Flag identifiers used outside scope (CG1201)."""
+
+    def _issue(name: str, hint: str) -> list[ConstraintIssue]:
+        return [
+            ConstraintIssue(
+                "CG1201",
+                f"Variable `{name}` is not defined in this scope",
+                hint=hint,
+            )
+        ]
 
     def _alias_name(expr: a.AstNode) -> str | None:
         if isinstance(expr, a.Alias):
@@ -1244,6 +1368,29 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                     out.add(n.variable.this)
         return out
 
+    def _comprehension_binders(node: a.AstNode | None) -> set[str]:
+        """Binders introduced by list / pattern comprehensions."""
+        out: set[str] = set()
+        if node is None:
+            return out
+        for comp in node.find_all(a.ListComprehension, a.PatternComprehension):
+            if isinstance(comp, a.ListComprehension):
+                if isinstance(comp.variable, a.Identifier):
+                    out.add(comp.variable.this)
+            elif isinstance(comp, a.PatternComprehension):
+                if isinstance(comp.variable, a.Identifier):
+                    out.add(comp.variable.this)
+                if comp.pattern is not None:
+                    for n in comp.pattern.walk():
+                        if isinstance(
+                            n, (a.NodePattern, a.RelationshipPattern)
+                        ) and isinstance(n.variable, a.Identifier):
+                            out.add(n.variable.this)
+        return out
+
+    def _local_binders(node: a.AstNode | None) -> set[str]:
+        return _pattern_pred_binders(node) | _comprehension_binders(node)
+
     def _refs(node: a.AstNode | None, *, ignore: set[str] | None = None) -> set[str]:
         if node is None:
             return set()
@@ -1265,88 +1412,77 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
             if isinstance(clause, (a.Match, a.Create, a.Merge)):
                 _add_pattern_vars(clause.pattern, scope)
                 where = getattr(clause, "where", None)
-                binders = _pattern_pred_binders(where)
+                binders = _local_binders(where)
                 for name in _refs(where, ignore=binders):
                     if name not in scope:
-                        return [
-                            ConstraintIssue(
-                                "CG1401",
-                                f"Variable `{name}` is not defined in this scope",
-                                hint="Project it in WITH or reintroduce via MATCH",
-                            )
-                        ]
+                        return _issue(
+                            name, "Project it in WITH or reintroduce via MATCH"
+                        )
             elif isinstance(clause, a.With):
                 for expr in clause.expressions or []:
+                    if isinstance(expr, a.Star):
+                        continue
                     core = expr.this if isinstance(expr, a.Alias) else expr
-                    binders = _pattern_pred_binders(core)
+                    binders = _local_binders(core)
                     for name in _refs(core, ignore=binders):
                         if name not in scope:
-                            return [
-                                ConstraintIssue(
-                                    "CG1401",
-                                    f"Variable `{name}` is not defined in this scope",
-                                    hint="Project it in a prior WITH or MATCH",
-                                )
-                            ]
-                nxt: set[str] = set()
+                            return _issue(
+                                name, "Project it in a prior WITH or MATCH"
+                            )
+                has_star = any(
+                    isinstance(expr, a.Star) for expr in (clause.expressions or [])
+                )
+                nxt: set[str] = set(scope) if has_star else set()
                 for expr in clause.expressions or []:
                     an = _alias_name(expr)
                     if an:
                         nxt.add(an)
-                where_scope = set(nxt)
-                binders = _pattern_pred_binders(clause.where)
+                binders = _local_binders(clause.where)
                 for name in _refs(clause.where, ignore=binders):
-                    if (
-                        name not in where_scope
-                        and name not in nxt
-                        and name not in scope
-                    ):
-                        return [
-                            ConstraintIssue(
-                                "CG1401",
-                                f"Variable `{name}` is not defined in this scope",
-                                hint="WITH WHERE uses projected aliases",
-                            )
-                        ]
+                    # WITH WHERE may only see projected aliases (not pre-WITH scope)
+                    if name not in nxt:
+                        return _issue(name, "WITH WHERE uses projected aliases")
                 for sub in (clause.order, clause.skip, clause.limit):
                     for name in _refs(sub):
                         if name not in nxt:
-                            return [
-                                ConstraintIssue(
-                                    "CG1401",
-                                    f"Variable `{name}` is not defined in this scope",
-                                    hint="WITH ORDER BY / SKIP / LIMIT use projected aliases",
-                                )
-                            ]
+                            return _issue(
+                                name,
+                                "WITH ORDER BY / SKIP / LIMIT use projected aliases",
+                            )
                 scope = nxt
             elif isinstance(clause, a.Unwind):
                 for name in _refs(clause.expression):
                     if name not in scope:
-                        return [
-                            ConstraintIssue(
-                                "CG1401",
-                                f"Variable `{name}` is not defined in this scope",
-                                hint="Project it before UNWIND",
-                            )
-                        ]
+                        return _issue(name, "Project it before UNWIND")
                 if isinstance(clause.alias, a.Identifier):
                     scope.add(clause.alias.this)
                 elif isinstance(clause.alias, str):
                     scope.add(clause.alias)
+            elif isinstance(clause, a.Set):
+                for item in clause.items or []:
+                    for name in _refs(item):
+                        if name not in scope:
+                            return _issue(name, "Bind it before SET")
+            elif isinstance(clause, a.Delete):
+                for expr in clause.expressions or []:
+                    for name in _refs(expr):
+                        if name not in scope:
+                            return _issue(name, "Bind it before DELETE")
+            elif isinstance(clause, a.Remove):
+                for item in clause.items or []:
+                    for name in _refs(item):
+                        if name not in scope:
+                            return _issue(name, "Bind it before REMOVE")
             elif isinstance(clause, a.Return):
                 ret_aliases: set[str] = set()
                 for expr in clause.expressions or []:
                     core = expr.this if isinstance(expr, a.Alias) else expr
-                    binders = _pattern_pred_binders(core)
+                    binders = _local_binders(core)
                     for name in _refs(core, ignore=binders):
                         if name not in scope:
-                            return [
-                                ConstraintIssue(
-                                    "CG1401",
-                                    f"Variable `{name}` is not defined in this scope",
-                                    hint="Carry it through WITH or MATCH again",
-                                )
-                            ]
+                            return _issue(
+                                name, "Carry it through WITH or MATCH again"
+                            )
                     an = _alias_name(expr)
                     if an:
                         ret_aliases.add(an)
@@ -1354,13 +1490,10 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                 for sub in (clause.order, clause.skip, clause.limit):
                     for name in _refs(sub):
                         if name not in order_scope:
-                            return [
-                                ConstraintIssue(
-                                    "CG1401",
-                                    f"Variable `{name}` is not defined in this scope",
-                                    hint="RETURN ORDER BY / SKIP / LIMIT use in-scope names",
-                                )
-                            ]
+                            return _issue(
+                                name,
+                                "RETURN ORDER BY / SKIP / LIMIT use in-scope names",
+                            )
         return []
 
     root = tree.this if isinstance(tree, a.Cypher) else tree
@@ -1577,6 +1710,27 @@ def _schema_property_access(
                 issue = _check_prop_against_rels(var, prop, rel_vars[var])
                 if issue:
                     out.append(issue)
+        for mp in node.find_all(a.MapProjection):
+            assert isinstance(mp, a.MapProjection)
+            if not isinstance(mp.this, a.Identifier):
+                continue
+            var = mp.this.this
+            for entry in mp.entries or []:
+                key: str | None = None
+                if isinstance(entry, str):
+                    key = entry
+                elif isinstance(entry, tuple) and entry:
+                    key = str(entry[0])
+                if not key:
+                    continue
+                if var in node_vars:
+                    issue = _check_prop_against_labels(var, key, node_vars[var])
+                    if issue:
+                        out.append(issue)
+                elif var in rel_vars:
+                    issue = _check_prop_against_rels(var, key, rel_vars[var])
+                    if issue:
+                        out.append(issue)
         return out
 
     def _check_query(q: a.Query) -> list[ConstraintIssue]:

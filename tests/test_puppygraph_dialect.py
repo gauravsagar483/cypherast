@@ -5,6 +5,7 @@ import pytest
 import cypherast
 from cypherast.dialects.puppygraph import PuppyGraph
 from cypherast.errors import ValidationError
+from cypherast.schema import GraphSchema
 
 
 def test_capabilities_flags():
@@ -96,6 +97,7 @@ def test_order_by_scope_after_with():
             write="puppygraph",
         )
     assert "not defined" in str(ei.value).lower()
+    assert ei.value.code == "CG1201"
 
 
 def test_optimize_pure_aggregate_ok_without_limit():
@@ -205,10 +207,14 @@ def test_validate_new_unlabelled_endpoint_still_fails():
 
 
 def test_optimize_propagates_label_without_schema_rel():
-    """Domain hop with no schema endpoints: copy neighbor label (fix CG1402)."""
+    """With schema endpoints, unlabelled end is filled (no neighbor-copy hack)."""
+    gs = GraphSchema()
+    gs.add_label("Metric")
+    gs.add_rel("DERIVED_FROM", "Metric", "Metric")
     opt = cypherast.optimize(
         "MATCH (a:Metric)-[:DERIVED_FROM]->(b) RETURN a.name LIMIT 20",
         write="puppygraph",
+        schema=gs,
     )
     out = opt.cypher(dialect="puppygraph")
     assert ":Metric" in out
@@ -217,9 +223,13 @@ def test_optimize_propagates_label_without_schema_rel():
 
 
 def test_optimize_labels_anonymous_end_from_neighbor():
+    gs = GraphSchema()
+    gs.add_label("Metric")
+    gs.add_rel("COMPUTED_FROM", "Metric", "Metric")
     opt = cypherast.optimize(
         "MATCH (m:Metric)-[:COMPUTED_FROM]->() RETURN m LIMIT 20",
         write="puppygraph",
+        schema=gs,
     )
     out = opt.cypher(dialect="puppygraph")
     assert "()" not in out.replace(" ", "")

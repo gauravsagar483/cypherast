@@ -170,7 +170,7 @@ uv run pytest tests/tck -q
 
 ## Status
 
-v0.1.3 — Fix prior-bound label reuse in OPTIONAL/MATCH (neighbor-copy bug).
+v0.1.4 — PuppyGraph constraint hardening (labelled nodes, Cartesian, FET-45, scope, list-concat).
 
 ## CI
 

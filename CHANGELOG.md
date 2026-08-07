@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-08-07
+
+### Fixed
+
+- PuppyGraph labelled-node rewrite: avoid `_n_*` self-joins on anonymous ends; parse/render node label OR (`:a|b`); drop neighbor-label copy fallback (infer from schema/mined endpoints only).
+- Cartesian detection: allow connected multi-path MATCH (shared vars); reject adjacent disjoint consecutive MATCH; `merge_match_chains` stitches into one path instead of comma multi-path.
+- List concatenation: scan WHERE / UNWIND / SET; do not fold `null + [list]` away before validate.
+- FET-45: treat `id(var) IS NOT NULL` as a null guard; disjunctive `IS NOT NULL OR …` does not count.
+- Undefined variables (**CG1201**): `WITH *` preserves scope; WITH WHERE uses projected aliases only; pattern/list comprehension binders ignored; SET / DELETE / REMOVE checked.
+- Schema **CG1305**: map-projection entries (`n{.id}` / `n{id}`) treated like `n.id`.
+
+### Changed
+
+- Undefined-variable issues use **CG1201** (was CG1401).
+- Neighbour-label invent fallback removed — supply `GraphSchema` endpoints (or mine from the query) for unlabelled ends.
+
 ## [0.1.3] - 2026-08-07
 
 ### Fixed
@@ -67,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dialects including openCypher and PuppyGraph capability constraints (Cartesian MATCH handling, collect/DISTINCT caps).
 - Named optimizer `Rule` / `RuleSet` with `only` / `disable` / constraint filters.
 
+[0.1.4]: https://github.com/gauravsagar483/cypherast/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/gauravsagar483/cypherast/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/gauravsagar483/cypherast/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/gauravsagar483/cypherast/compare/v0.1.0...v0.1.1

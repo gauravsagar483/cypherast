@@ -62,6 +62,12 @@ def simplify(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
             if ln is not None and rn is not None:
                 val = ln + rn
                 return a.Float(this=val) if isinstance(val, float) else a.Integer(this=val)
+            # Keep list concat visible for dialect validate (null + [1] must not
+            # fold to null and greenwash allow_list_concat=False).
+            if isinstance(node.this, (a.List, a.ListComprehension)) or isinstance(
+                node.expression, (a.List, a.ListComprehension)
+            ):
+                return node
             if _is_null(node.this) or _is_null(node.expression):
                 return a.Null()
         if isinstance(node, a.Mul):
