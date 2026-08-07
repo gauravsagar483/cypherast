@@ -227,6 +227,24 @@ def test_optimize_labels_anonymous_end_from_neighbor():
     assert not any(i.code == "CG1402" for i in cypherast.validate(opt, dialect="puppygraph"))
 
 
+def test_optimize_prior_bound_label_not_neighbor_copy():
+    """Reuse site (dl) must keep DataLakeTables — not copy DataQualityCheck from end."""
+    q = (
+        "MATCH (dl:DataLakeTables) "
+        "OPTIONAL MATCH (dl)-[:HAS_DQ_CHECK]->(dq:DataQualityCheck) "
+        "RETURN CASE WHEN dq IS NULL THEN NULL ELSE "
+        "replace(split(toString(id(dq)), '[')[1], ']', '') END AS dq_check_vertex_id"
+    )
+    opt = cypherast.optimize(q, write="puppygraph")
+    out = opt.cypher(dialect="puppygraph")
+    assert "dl:DataQualityCheck" not in out.replace(" ", "")
+    assert "DataLakeTables" in out
+    assert "DataQualityCheck" in out
+    # OPTIONAL reuse of dl should carry prior label (or stay bare — never wrong label)
+    assert "(dl:DataLakeTables)" in out.replace(" ", "") or "(dl)-" in out.replace(" ", "")
+    assert not any(i.code == "CG1402" for i in cypherast.validate(opt, dialect="puppygraph"))
+
+
 def test_optimize_labels_anonymous_endpoints():
     """PuppyGraph optimize fills () from default schema — no CG1402 after."""
     opt = cypherast.optimize(

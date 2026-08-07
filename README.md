@@ -170,7 +170,7 @@ uv run pytest tests/tck -q
 
 ## Status
 
-v0.1.2 — PuppyGraph hardening, schema catalog, strict optimize-by-default.
+v0.1.3 — Fix prior-bound label reuse in OPTIONAL/MATCH (neighbor-copy bug).
 
 ## CI
 

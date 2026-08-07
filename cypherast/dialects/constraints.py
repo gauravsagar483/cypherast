@@ -268,6 +268,9 @@ def ensure_labelled_nodes(
         )
 
     counter = {"n": 0}
+    # Labels already bound to a variable in an earlier MATCH — reuse sites must
+    # keep that label (never copy a neighbor's label onto a prior-bound var).
+    var_labels: dict[str, set[str]] = {}
 
     def _name() -> str:
         counter["n"] += 1
@@ -282,6 +285,11 @@ def ensure_labelled_nodes(
         if n.labels.labels:
             return {str(x) for x in n.labels.labels}
         return set()
+
+    def _var_name(n: a.NodePattern) -> str | None:
+        if isinstance(n.variable, a.Identifier) and n.variable.this:
+            return str(n.variable.this)
+        return None
 
     def _apply_labels(n: a.NodePattern, cands: set[str]) -> bool:
         # Ignore OR-expression markers stored as single joined string with |
@@ -300,6 +308,9 @@ def ensure_labelled_nodes(
             )
         if n.variable is None:
             n.variable = a.Identifier(this=_name())
+        vn = _var_name(n)
+        if vn:
+            var_labels.setdefault(vn, set()).update(clean)
         return True
 
     def _rel_def(tname: str) -> RelTypeDef | None:
@@ -365,6 +376,13 @@ def ensure_labelled_nodes(
     def _infer_path(path: a.PathPattern) -> bool:
         changed = False
         els = list(path.elements or [])
+        # Stamp prior-bound labels onto bare reuse sites before schema/neighbor inference
+        for el in els:
+            if not isinstance(el, a.NodePattern):
+                continue
+            vn = _var_name(el)
+            if vn and not _existing_labels(el) and vn in var_labels:
+                changed |= _apply_labels(el, var_labels[vn])
         i = 0
         while i + 2 < len(els):
             left, rel, right = els[i], els[i + 1], els[i + 2]
@@ -431,11 +449,20 @@ def ensure_labelled_nodes(
             # Fallback when schema/mining had no endpoints: copy labels from the
             # labelled neighbor so PuppyGraph gets a labelled pattern instead of
             # CG1402 (e.g. (a:Metric)-[:DERIVED_FROM]->(b) → (b:Metric)).
+            # Never stamp a neighbor label onto a var already bound earlier —
+            # that rewrote (dl:DataLakeTables)…(dl)-[:R]->(dq:DQ) into
+            # (dl:DataQualityCheck) and broke the hop.
             left_labs = {x for x in _existing_labels(left) if "|" not in x}
             right_labs = {x for x in _existing_labels(right) if "|" not in x}
-            if not _existing_labels(right) and left_labs:
+            right_vn = _var_name(right)
+            left_vn = _var_name(left)
+            if not _existing_labels(right) and left_labs and (
+                right_vn is None or right_vn not in var_labels
+            ):
                 changed |= _apply_labels(right, left_labs)
-            if not _existing_labels(left) and right_labs:
+            if not _existing_labels(left) and right_labs and (
+                left_vn is None or left_vn not in var_labels
+            ):
                 changed |= _apply_labels(left, right_labs)
             i += 2
         return changed
@@ -448,6 +475,12 @@ def ensure_labelled_nodes(
         for path in match.pattern.paths or []:
             if isinstance(path, a.PathPattern):
                 paths.append(path)
+                for el in path.elements or []:
+                    if isinstance(el, a.NodePattern):
+                        labs = {x for x in _existing_labels(el) if "|" not in x}
+                        vn = _var_name(el)
+                        if vn and labs:
+                            var_labels.setdefault(vn, set()).update(labs)
 
     for path in paths:
         _mine_path(path)

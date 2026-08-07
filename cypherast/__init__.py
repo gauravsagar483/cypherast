@@ -18,7 +18,7 @@ from cypherast.errors import (
 from cypherast.lexer import Lexer, Token, TokenKind
 from cypherast.parser import Parser
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 
 def parse(cypher: str, read: str | None = None) -> list[ast.AstNode]:
