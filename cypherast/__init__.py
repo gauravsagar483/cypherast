@@ -40,6 +40,7 @@ def optimize(
     write: str | None = None,
     *,
     strict: bool = True,
+    oc9_strict: bool = False,
     only: list[str] | tuple[str, ...] | None = None,
     disable: list[str] | tuple[str, ...] | None = None,
     constraint_only: list[str] | tuple[str, ...] | None = None,
@@ -64,7 +65,15 @@ def optimize(
     from cypherast.dialects.dialect import get_dialect_cls
 
     tree = cypher if isinstance(cypher, ast.AstNode) else parse_one(cypher, read=read)
-    target = get_dialect_cls(write or read)
+    write_name = write or read
+    if oc9_strict and (write_name or "opencypher").lower() in {
+        "opencypher",
+        "cypher",
+        "oc",
+        "open_cypher",
+    }:
+        write_name = "opencypher9"
+    target = get_dialect_cls(write_name)
     return target.optimize(
         tree,
         schema=schema,
@@ -114,9 +123,7 @@ def translate(
             constraint_disable=constraint_disable,
         )
     else:
-        tree = target_cls.apply_constraints(
-            tree, only=constraint_only, disable=constraint_disable
-        )
+        tree = target_cls.apply_constraints(tree, only=constraint_only, disable=constraint_disable)
         if strict:
             raise_if_invalid(tree, target_cls.capabilities)
     return target_cls.renderer().generate(tree, pretty=pretty)
@@ -132,6 +139,7 @@ def validate(
     read: str | None = None,
     dialect: str | None = None,
     schema: object | None = None,
+    oc9_strict: bool = False,
 ) -> list[object]:
     """Return capability ``ConstraintIssue`` list for ``dialect`` (default ``read``).
 
@@ -144,8 +152,15 @@ def validate(
     from cypherast.dialects.dialect import get_dialect_cls
 
     tree = cypher if isinstance(cypher, ast.AstNode) else parse_one(cypher, read=read)
-    return list(get_dialect_cls(dialect or read).validate(tree, schema=schema))
-
+    dialect_name = dialect or read
+    if oc9_strict and (dialect_name or "opencypher").lower() in {
+        "opencypher",
+        "cypher",
+        "oc",
+        "open_cypher",
+    }:
+        dialect_name = "opencypher9"
+    return list(get_dialect_cls(dialect_name).validate(tree, schema=schema))
 
 
 def explain(cypher: str, schema: object | None = None, read: str | None = None) -> str:

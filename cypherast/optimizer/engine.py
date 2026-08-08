@@ -114,11 +114,7 @@ def resolve_rules(
     disable: Iterable[str] | None = None,
 ) -> RuleSet:
     """Pick rule list: explicit ``rules``, else ``base`` filtered by only/disable."""
-    rs = (
-        (rules if isinstance(rules, RuleSet) else RuleSet(rules))
-        if rules is not None
-        else base
-    )
+    rs = (rules if isinstance(rules, RuleSet) else RuleSet(rules)) if rules is not None else base
     if only is not None:
         rs = rs.only(*only)
     if disable is not None:

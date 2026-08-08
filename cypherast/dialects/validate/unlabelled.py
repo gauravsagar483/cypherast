@@ -125,4 +125,3 @@ def _unlabelled_nodes(tree: a.AstNode) -> list[ConstraintIssue]:
         assert isinstance(match, a.Match)
         _check_match(match)
     return issues
-

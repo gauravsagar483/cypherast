@@ -35,20 +35,12 @@ def apply_capabilities(
         )
     if not caps.allow_cartesian_match_paths and caps.rewrite_cartesian_match_paths:
         node = split_multi_path_match(node)
-    if (
-        not caps.allow_distinct_with_aggregate
-        and caps.rewrite_distinct_beside_aggregate
-    ):
+    if not caps.allow_distinct_with_aggregate and caps.rewrite_distinct_beside_aggregate:
         node = drop_distinct_beside_aggregate(node)
-    if (
-        caps.rewrite_collect_distinct_cap
-        and caps.max_collect_distinct_per_clause is not None
-    ):
+    if caps.rewrite_collect_distinct_cap and caps.max_collect_distinct_per_clause is not None:
         node = cap_collect_distinct(node, max_n=caps.max_collect_distinct_per_clause)
     if not caps.allow_nulls_order_modifiers:
         node = strip_nulls_order_modifiers(node)
     if caps.rewrite_unguarded_optional_scalar_use:
-        node = guard_optional_scalar_use(
-            node, risky_functions=caps.optional_risky_functions
-        )
+        node = guard_optional_scalar_use(node, risky_functions=caps.optional_risky_functions)
     return node

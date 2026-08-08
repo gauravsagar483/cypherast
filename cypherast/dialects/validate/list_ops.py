@@ -171,9 +171,7 @@ def _node_in_list_membership(tree: a.AstNode) -> list[ConstraintIssue]:
     for n in tree.find_all(a.In):
         assert isinstance(n, a.In)
         left = n.this
-        if isinstance(left, a.Identifier) and left.this in node_vars and _listish_rhs(
-            n.expression
-        ):
+        if isinstance(left, a.Identifier) and left.this in node_vars and _listish_rhs(n.expression):
             return [
                 ConstraintIssue(
                     "CG1401",

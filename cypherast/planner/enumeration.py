@@ -53,9 +53,7 @@ def _labeled_nodes(pattern: a.Pattern) -> list[tuple[str, str, list[str]]]:
             if not labels:
                 continue
             props = (
-                [k for k, _ in el.properties.entries]
-                if isinstance(el.properties, a.Map)
-                else []
+                [k for k, _ in el.properties.entries] if isinstance(el.properties, a.Map) else []
             )
             out.append((el.variable.this, labels[0], props))
     return out
@@ -85,11 +83,7 @@ def _plan_match_from_anchor(
                 detail = ":" + "|".join(rel.types) if rel.types else ""
                 if schema and rel.types:
                     detail = _orient_expand(detail, rel, schema)
-                op = (
-                    ops.ExpandVariable(detail)
-                    if rel.variable_length
-                    else ops.Expand(detail)
-                )
+                op = ops.ExpandVariable(detail) if rel.variable_length else ops.Expand(detail)
                 op.children = [chain]
                 chain = op
             i += 2

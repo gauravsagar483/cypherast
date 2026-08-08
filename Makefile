@@ -61,11 +61,26 @@ test: ## Run pytest
 test-cov: ## Pytest with coverage
 	$(UV) run pytest --cov=$(PKG) --cov-report=term-missing --cov-report=xml
 
-test-tck: ## TCK parse-rate scoreboard
-	$(UV) run pytest tests/tck -q -s
+test-tck: ## TCK smoke (infrastructure only)
+	$(UV) run pytest tests/tck/test_tck_smoke.py -q
+
+test-tck-official: ## Official TCK from /tmp → tests/tck/results.md
+	$(UV) run python -m tests.tck
+
+test-tck-official-parse: ## Official TCK parse gate only
+	$(UV) run python -m tests.tck --parse-only
+
+test-tck-oc9: ## Official TCK with OC9 scenario filter
+	CYPHERAST_TCK_OC9_FILTER=1 $(UV) run python -m tests.tck
+
+grammar-smoke: ## Parse-smoke queries from tools/grammar_smoke_queries.txt
+	$(PYTHON) tools/grammar_smoke.py
 
 test-puppy: ## PuppyGraph dialect tests
 	$(UV) run pytest tests/test_puppygraph_dialect.py -q
+
+test-dialects: ## Multidialect + public API regression
+	$(UV) run pytest tests/test_dialect_regression.py tests/test_parse.py tests/test_web_dialect_transpile.py -q
 
 lint: ## Ruff check
 	$(UV) run ruff check $(PKG) tests

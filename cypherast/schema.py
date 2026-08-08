@@ -91,11 +91,7 @@ class GraphSchema:
         ld = self._find_label(label)
         if ld is None:
             return []
-        return [
-            p.name
-            for p in ld.properties.values()
-            if include_id_fields or not p.id_field
-        ]
+        return [p.name for p in ld.properties.values() if include_id_fields or not p.id_field]
 
     def has_property(self, label: str, prop: str) -> bool:
         pd = self.get_property(label, prop)
@@ -162,9 +158,7 @@ def ensure_schema(schema: object | None) -> GraphSchema | None:
         return None
     if isinstance(schema, GraphSchema):
         return schema
-    raise TypeError(
-        f"schema must be GraphSchema or None, got {type(schema).__name__}"
-    )
+    raise TypeError(f"schema must be GraphSchema or None, got {type(schema).__name__}")
 
 
 # Built-in Cypher function signatures: name -> (arg_types, return_type)
@@ -175,6 +169,10 @@ FUNCTION_SIGNATURES: dict[str, tuple[list[str], str]] = {
     "min": (["any"], "any"),
     "max": (["any"], "any"),
     "collect": (["any"], "list"),
+    "percentileCont": (["float", "number"], "float"),
+    "percentileDisc": (["float", "number"], "float"),
+    "stdev": (["number"], "float"),
+    "stdevP": (["number"], "float"),
     "size": (["any"], "integer"),
     "length": (["path"], "integer"),
     "type": (["relationship"], "string"),
@@ -198,25 +196,90 @@ FUNCTION_SIGNATURES: dict[str, tuple[list[str], str]] = {
     "round": (["number"], "number"),
     "sqrt": (["number"], "float"),
     "sign": (["number"], "integer"),
+    "exp": (["number"], "float"),
+    "log": (["number"], "float"),
+    "log10": (["number"], "float"),
+    "e": ([], "float"),
+    "pi": ([], "float"),
+    "rand": ([], "float"),
+    "timestamp": ([], "integer"),
     "sin": (["number"], "float"),
     "cos": (["number"], "float"),
     "tan": (["number"], "float"),
+    "acos": (["number"], "float"),
+    "asin": (["number"], "float"),
+    "atan": (["number"], "float"),
+    "atan2": (["number", "number"], "float"),
+    "cot": (["number"], "float"),
+    "degrees": (["number"], "float"),
+    "radians": (["number"], "float"),
     "replace": (["string", "string", "string"], "string"),
-    "substring": (["string", "integer"], "string"),
+    "substring": (["string", "integer", "integer"], "string"),
+    "left": (["string", "integer"], "string"),
+    "right": (["string", "integer"], "string"),
     "trim": (["string"], "string"),
+    "lTrim": (["string"], "string"),
+    "rTrim": (["string"], "string"),
     "toLower": (["string"], "string"),
     "toUpper": (["string"], "string"),
     "split": (["string", "string"], "list"),
     "reverse": (["any"], "any"),
     "nodes": (["path"], "list"),
     "relationships": (["path"], "list"),
-    "startNode": (["relationship"], "node"),
-    "endNode": (["relationship"], "node"),
+    "startNode": (["path"], "node"),
+    "endNode": (["path"], "node"),
     "shortestPath": (["pattern"], "path"),
     "allShortestPaths": (["pattern"], "list"),
 }
 
+# Alternate names → canonical registry key (lowercase keys)
+FUNCTION_ALIASES: dict[str, str] = {
+    "rels": "relationships",
+    "lower": "toLower",
+    "upper": "toUpper",
+}
+
+# Variadic / optional-argument helpers for validation
+FUNCTION_VARIADIC_MIN: dict[str, int] = {"coalesce": 1}
+FUNCTION_OPTIONAL_ARGS: dict[str, int] = {"substring": 1, "range": 1}
+
+# Excluded from openCypher 9 (standardisation-scope.adoc)
+OC9_EXCLUDED_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "exists",
+        "all",
+        "any",
+        "none",
+        "single",
+        "filter",
+        "extract",
+        "reduce",
+        "distance",
+        "point",
+        "haversin",
+    }
+)
+
+_SIG_LOWER: dict[str, tuple[list[str], str]] = {
+    k.lower(): v for k, v in FUNCTION_SIGNATURES.items()
+}
+
+
+def canonicalize_function_name(name: str) -> str | None:
+    """Resolve aliases and case variants to a registry key, or None."""
+    if name in FUNCTION_SIGNATURES:
+        return name
+    lower = name.lower()
+    if lower in FUNCTION_ALIASES:
+        return FUNCTION_ALIASES[lower]
+    for key in FUNCTION_SIGNATURES:
+        if key.lower() == lower:
+            return key
+    return None
+
 
 def lookup_function(name: str) -> tuple[list[str], str] | None:
-    return FUNCTION_SIGNATURES.get(name) or FUNCTION_SIGNATURES.get(name.lower())
-
+    canon = canonicalize_function_name(name)
+    if canon is not None:
+        return FUNCTION_SIGNATURES[canon]
+    return _SIG_LOWER.get(name.lower())

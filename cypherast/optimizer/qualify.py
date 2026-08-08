@@ -50,7 +50,8 @@ def qualify(
         elif (
             isinstance(node, a.RelationshipPattern)
             and node.variable is None
-            and (node.types or node.properties or node.variable_length)
+            and not node.variable_length
+            and (node.types or node.properties)
         ):
             node.variable = a.Identifier(this=_name("r"))
         return node

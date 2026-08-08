@@ -6,7 +6,8 @@ cypherast speaks multiple Cypher dialects through one AST. Dialects plug in at p
 
 | Name | Role |
 |------|------|
-| `opencypher` | Default baseline |
+| `opencypher` | openCypher 9 baseline (validation + render) |
+| `opencypher9` | Alias for `opencypher` |
 | `neo4j` | Neo4j-oriented parse/render deltas |
 | `memgraph` | Memgraph-oriented deltas |
 | `puppygraph` | openCypher subclass + engine capability constraints |
@@ -85,6 +86,23 @@ MATCH (n:Person) WHERE (n)-[:KNOWS]->(m:Person) RETURN n
 ```
 
 Do not invent `_n_*` qualifiers inside pattern predicates when `require_labelled_nodes` is on.
+
+## openCypher 9
+
+`opencypher` uses `OPENCYPHER9_CAPABILITIES` — undefined-variable checks, excluded-clause rejection (**CG1501**–**CG1511**), function catalog validation, and bare pattern-predicate rendering. `opencypher9` is an alias.
+
+```python
+import cypherast
+
+cypherast.validate(q, dialect="opencypher")
+cypherast.optimize(q, write="opencypher")
+```
+
+PuppyGraph subclasses openCypher and extends the same OC9 base via `dataclasses.replace` with engine-specific constraints (labelled nodes, Cartesian rejection, FET-45, etc.). Unlike strict OC9 validate, PuppyGraph **allows** binding a variable to a variable-length relationship (`-[r*1..n]->`); use anonymous or path variables only when targeting `opencypher` / `opencypher9`.
+
+Spec reference: [openCypher 9 (PDF)](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
+
+Conformance is measured against the official [openCypher TCK](https://github.com/opencypher/openCypher/tree/master/tck) (cloned to `/tmp` at test time — see `make test-tck-official`). Latest scoreboard: `tests/tck/results.md`.
 
 ## Custom dialect sketch
 

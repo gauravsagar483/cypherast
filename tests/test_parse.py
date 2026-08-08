@@ -1,5 +1,7 @@
 """Parse / render roundtrip tests."""
 
+import pytest
+
 import cypherast
 
 QUERIES = [
@@ -21,9 +23,10 @@ QUERIES = [
 ]
 
 
-def test_parse_smoke():
+@pytest.mark.parametrize("read", ["opencypher", "neo4j", "memgraph", "puppygraph", "opencypher9"])
+def test_parse_smoke(read: str):
     for q in QUERIES:
-        tree = cypherast.parse_one(q)
+        tree = cypherast.parse_one(q, read=read)
         assert tree is not None
         rendered = tree.cypher()
         assert isinstance(rendered, str)

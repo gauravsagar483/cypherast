@@ -49,9 +49,7 @@ def _note_unknown_label(
         )
 
 
-def _schema_unknown_types(
-    tree: a.AstNode, schema: GraphSchema
-) -> list[ConstraintIssue]:
+def _schema_unknown_types(tree: a.AstNode, schema: GraphSchema) -> list[ConstraintIssue]:
     """Closed-world label / rel-type check when ``schema.strict``.
 
     ``schema is None`` callers never reach here. Non-strict schemas keep
@@ -94,9 +92,7 @@ def _schema_unknown_types(
     return issues
 
 
-def _schema_property_access(
-    tree: a.AstNode, schema: GraphSchema
-) -> list[ConstraintIssue]:
+def _schema_property_access(tree: a.AstNode, schema: GraphSchema) -> list[ConstraintIssue]:
     """Reject id-field / undeclared property access when labels/types are known.
 
     Id-field markers always reject (``n.id_col`` → use ``id(n)``). Undeclared
@@ -134,9 +130,7 @@ def _schema_property_access(
                 if isinstance(n.variable, a.Identifier) and types:
                     rel_vars.setdefault(n.variable.this, set()).update(types)
 
-    def _check_prop_against_labels(
-        var: str, prop: str, labels: set[str]
-    ) -> ConstraintIssue | None:
+    def _check_prop_against_labels(var: str, prop: str, labels: set[str]) -> ConstraintIssue | None:
         known = [lb for lb in labels if schema.has_label(lb)]
         if not known:
             return None
@@ -154,9 +148,7 @@ def _schema_property_access(
             )
         return None
 
-    def _check_prop_against_rels(
-        var: str, prop: str, types: set[str]
-    ) -> ConstraintIssue | None:
+    def _check_prop_against_rels(var: str, prop: str, types: set[str]) -> ConstraintIssue | None:
         known = [rt for rt in types if schema.has_rel(rt)]
         if not known:
             return None
@@ -169,8 +161,7 @@ def _schema_property_access(
         if schema.strict and not any(schema.has_rel_property(rt, prop) for rt in known):
             return ConstraintIssue(
                 "CG1303",
-                f"Unknown property `{prop}` on relationship type(s) "
-                f"{', '.join(sorted(known))}",
+                f"Unknown property `{prop}` on relationship type(s) {', '.join(sorted(known))}",
                 hint="Declare it on GraphSchema or remove the access",
             )
         return None

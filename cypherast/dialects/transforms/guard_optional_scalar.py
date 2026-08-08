@@ -103,10 +103,7 @@ def _is_not_null_guard_for_var(n: a.IsNull, var: str) -> bool:
         return False
     if isinstance(n.this, a.Identifier) and n.this.this == var:
         return True
-    if (
-        isinstance(n.this, a.FunctionCall)
-        and str(n.this.name).lower() in {"id", "elementid"}
-    ):
+    if isinstance(n.this, a.FunctionCall) and str(n.this.name).lower() in {"id", "elementid"}:
         for arg in n.this.expressions or []:
             if isinstance(arg, a.Identifier) and arg.this == var:
                 return True
@@ -166,11 +163,7 @@ def guard_optional_scalar_use(
     When ``risky_functions`` is None, uses ``DEFAULT_OPTIONAL_RISKY_FUNCTIONS``
     (empty). Dialects pass ``caps.optional_risky_functions`` via catalog/apply.
     """
-    risky = (
-        DEFAULT_OPTIONAL_RISKY_FUNCTIONS
-        if risky_functions is None
-        else risky_functions
-    )
+    risky = DEFAULT_OPTIONAL_RISKY_FUNCTIONS if risky_functions is None else risky_functions
     if not risky:
         return tree
     optional_vars = _optional_pattern_vars(tree)
@@ -178,9 +171,7 @@ def guard_optional_scalar_use(
         return tree
 
     def _wrap(expr: a.AstNode) -> a.AstNode:
-        needed = _risky_optional_vars_in(
-            expr, optional_vars, risky_functions=risky
-        )
+        needed = _risky_optional_vars_in(expr, optional_vars, risky_functions=risky)
         if not needed:
             return expr
         # Skip if every needed var already has a null guard somewhere on the expr
@@ -191,10 +182,7 @@ def guard_optional_scalar_use(
         # Already a null-guard CASE at the root — leave it
         if isinstance(core, a.Case) and all(_optional_var_guarded(core, v) for v in needed):
             return expr
-        ifs = [
-            (a.IsNull(this=a.Identifier(this=v)), a.Null())
-            for v in sorted(needed)
-        ]
+        ifs = [(a.IsNull(this=a.Identifier(this=v)), a.Null()) for v in sorted(needed)]
         wrapped = a.Case(this=None, ifs=ifs, default=core)
         if alias is not None:
             return a.Alias(this=wrapped, alias=alias)

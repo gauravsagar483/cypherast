@@ -52,9 +52,7 @@ def optimize(
     from cypherast.optimizer import optimize as _opt_optimize
 
     if only is not None or disable is not None:
-        return _opt_optimize(
-            tree, schema=schema, rules=rules, only=only, disable=disable
-        )
+        return _opt_optimize(tree, schema=schema, rules=rules, only=only, disable=disable)
     if isinstance(rules, RS):
         return _opt_optimize(tree, schema=schema, rules=rules)
     if rules is not None:

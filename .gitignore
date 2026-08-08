@@ -13,6 +13,7 @@ dist/
 htmlcov/
 coverage.xml
 scripts/*_results.json
+tests/tck/results.md
 *.cover
 .hypothesis/
 .tox/
@@ -36,11 +37,7 @@ id_ed25519.*
 .secrets/
 secrets/
 
-# Editor / OS / local tool state (not shared)
-.DS_Store
-.idea/
-.vscode/
-*.swp
-*~
-.claude/
-.cursor/
+# Local / private (not for public release)
+scripts/puppy_schema_to_cypherast.py
+scripts/fixtures/metagraph_main_schema.json
+scripts/fixtures/

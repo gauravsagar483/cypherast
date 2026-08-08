@@ -41,9 +41,7 @@ def ScanAll(var: str, children: list[PhysicalOp] | None = None) -> PhysicalOp:
     return op
 
 
-def ScanAllByLabel(
-    var: str, label: str, children: list[PhysicalOp] | None = None
-) -> PhysicalOp:
+def ScanAllByLabel(var: str, label: str, children: list[PhysicalOp] | None = None) -> PhysicalOp:
     op = PhysicalOp("ScanAllByLabel", f"({var} :{label})")
     if children:
         op.children = children
@@ -143,9 +141,14 @@ def EmptyResult(children: list[PhysicalOp] | None = None) -> PhysicalOp:
         op.children = children
     return op
 
+
 def format_plan(plan: t.Any) -> str:
     """Memgraph-style bottom-up textual plan."""
-    lines: list[str] = ["+---------------------------+", "| QUERY PLAN                |", "+---------------------------+"]
+    lines: list[str] = [
+        "+---------------------------+",
+        "| QUERY PLAN                |",
+        "+---------------------------+",
+    ]
     ops = _flatten(plan.root)
     for op in reversed(ops):
         cost = f"  cost={op.cost:.1f}" if op.cost else ""

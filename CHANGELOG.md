@@ -7,21 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-08-08
+
 ### Added
 
+- openCypher 9 validation (CG1501–CG1512): excluded clauses, undirected patterns,
+  variable-length binding, quantified paths, USING hints, function signatures,
+  comparability checks (`cypherast/dialects/validate/opencypher/`).
+- ``opencypher9`` dialect alias (same capabilities as ``opencypher``).
+- Official [openCypher TCK](https://github.com/opencypher/openCypher/tree/master/tck)
+  runner: clone to ``/tmp``, dialect-aware parse/run scoreboard
+  (``make test-tck-official``, ``tests/tck/results.md``).
+- Multidialect regression suite (``tests/test_dialect_regression.py``,
+  ``make test-dialects``) — all engines + public API with explicit ``read``/``write``.
+- Parser/AST: label predicates (``n:Label``), list slices ``[n..m]`` / ``[n..]``,
+  pattern comprehensions, keyword-safe property/map keys.
+- Executor procedure stub registry (``cypherast/executor/procedures.py``).
 - ``CALL { … }`` **RETURN** aliases exported to outer scope for CG1201 (PuppyGraph).
 - Residual ``:_Node`` (+ ``_n_K`` if anon) after ``ensure_labelled_nodes`` mine/infer.
 - Web Cypher transpile fixtures: ``tests/fixtures/web_cypher_queries.py``.
+- Consolidated OC9 tests: ``tests/test_opencypher.py``.
 
 ### Fixed
 
 - ``cypherast.lineage`` no longer overwritten by the ``lineage`` submodule on first
   call (lazy import rebound the package attribute to the module).
+- PuppyGraph: allow bound variable-length relationships (``-[r*1..n]->``) — exempt
+  from OC9 CG1504 for Metagraph lineage / blast-radius queries.
 
 ### Changed
 
+- Removed vendored TCK ``.feature`` files; conformance runs against external clone only.
 - Removed ``modern_graph_schema()`` and PuppyGraph default-schema inject. Pass
   caller ``schema=`` for endpoint inference; omit → query mine only + ``:_Node``.
+- TCK runner: skip outlines, procedure stubs, unparseable queries; improved compare.
 
 ## [0.1.8] - 2026-08-07
 
@@ -152,6 +171,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dialects including openCypher and PuppyGraph capability constraints (Cartesian MATCH handling, collect/DISTINCT caps).
 - Named optimizer `Rule` / `RuleSet` with `only` / `disable` / constraint filters.
 
+[0.1.9]: https://github.com/gauravsagar483/cypherast/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/gauravsagar483/cypherast/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/gauravsagar483/cypherast/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/gauravsagar483/cypherast/compare/v0.1.5...v0.1.6

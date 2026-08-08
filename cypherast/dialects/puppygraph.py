@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import typing as t
+from dataclasses import replace
 
 from cypherast import ast as a
-from cypherast.dialects.capabilities import DialectCapabilities
+from cypherast.dialects.capabilities import OPENCYPHER9_CAPABILITIES, DialectCapabilities
 from cypherast.dialects.dialect import register
 from cypherast.dialects.opencypher import OpenCypher, OpenCypherRenderer
 from cypherast.renderer import Renderer
@@ -29,12 +30,13 @@ class PuppyGraphRenderer(OpenCypherRenderer):
 
 @register
 class PuppyGraph(OpenCypher):
-    """PuppyGraph engine dialect (generic capability overrides — no domain schema)."""
+    """PuppyGraph engine dialect (OC9 base + generic capability overrides)."""
 
     name = "puppygraph"
     aliases: t.ClassVar[list[str]] = ["puppy"]
     renderer_cls: t.ClassVar[type[Renderer]] = PuppyGraphRenderer
-    capabilities: t.ClassVar[DialectCapabilities] = DialectCapabilities(
+    capabilities: t.ClassVar[DialectCapabilities] = replace(
+        OPENCYPHER9_CAPABILITIES,
         require_labelled_nodes=True,
         allow_cartesian_match_paths=False,
         rewrite_cartesian_match_paths=False,  # keep rejecting; don't greenwash split
@@ -42,7 +44,8 @@ class PuppyGraph(OpenCypher):
         max_var_length_hops=None,
         allow_unbounded_var_length=True,
         rewrite_var_length_bounds=False,
-        allow_exists_function=False,
+        # PuppyGraph allows bound var-length rels (Metagraph lineage / blast-radius).
+        reject_var_length_binding=False,
         allow_list_comprehension=False,
         allow_pattern_comprehension=True,
         allow_list_concat=False,
@@ -62,6 +65,5 @@ class PuppyGraph(OpenCypher):
         rewrite_distinct_beside_aggregate=False,  # PJT-97: reject, don't drop DISTINCT
         allow_nulls_order_modifiers=False,
         require_matching_union_columns=True,
-        check_undefined_variables=True,
         pattern_predicate_introduces_bindings=False,
     )

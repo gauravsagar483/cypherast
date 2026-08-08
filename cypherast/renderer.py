@@ -49,7 +49,12 @@ class Renderer:
     # --- top-level --------------------------------------------------------
 
     def render_Cypher(self, node: a.Cypher) -> str:
-        return self.dispatch(node.this)
+        body = self.dispatch(node.this)
+        if node.version is not None:
+            prefix = f"CYPHER {node.version}"
+            sep = "\n" if self._pretty else " "
+            return prefix + sep + body
+        return body
 
     def render_Query(self, node: a.Query) -> str:
         sep = "\n" if self._pretty else " "
@@ -74,6 +79,9 @@ class Renderer:
             parts.append("MATCH")
         parts.append(self.dispatch(node.pattern))
         body = " ".join(parts)
+        if node.hints:
+            sep = "\n" if self._pretty else " "
+            body += sep + sep.join(node.hints)
         if node.where:
             sep = "\n" if self._pretty else " "
             body += sep + self.dispatch(node.where)
@@ -163,6 +171,13 @@ class Renderer:
         return "SET " + ", ".join(self.dispatch(i) for i in node.items)
 
     def render_SetItem(self, node: a.SetItem) -> str:
+        if isinstance(node.this, a.NodePattern):
+            parts: list[str] = []
+            if node.this.variable:
+                parts.append(self.dispatch(node.this.variable))
+            if node.this.labels:
+                parts.append(self.dispatch(node.this.labels))
+            return "".join(parts)
         op = node.op or "="
         return f"{self.dispatch(node.this)} {op} {self.dispatch(node.expression)}"
 
@@ -179,8 +194,7 @@ class Renderer:
     def render_Foreach(self, node: a.Foreach) -> str:
         body = " ".join(self.dispatch(c) for c in node.clauses)
         return (
-            f"FOREACH ({self.dispatch(node.variable)} IN {self.dispatch(node.expression)}"
-            f" | {body})"
+            f"FOREACH ({self.dispatch(node.variable)} IN {self.dispatch(node.expression)} | {body})"
         )
 
     def render_CallSubquery(self, node: a.CallSubquery) -> str:
@@ -251,7 +265,11 @@ class Renderer:
         if node.properties:
             inner_parts.append(self.dispatch(node.properties))
         detail = "".join(inner_parts)
-        bracketed = f"[{detail}]" if detail or node.variable_length or node.types or node.properties or node.variable else ""
+        bracketed = (
+            f"[{detail}]"
+            if detail or node.variable_length or node.types or node.properties or node.variable
+            else ""
+        )
         d = node.direction
         if d is a.Direction.OUTGOING:
             return f"-{bracketed}->" if bracketed else "-->"
@@ -306,6 +324,14 @@ class Renderer:
 
     def render_ListSubscript(self, node: a.ListSubscript) -> str:
         return f"{self.dispatch(node.this)}[{self.dispatch(node.index)}]"
+
+    def render_ListSlice(self, node: a.ListSlice) -> str:
+        start = "" if node.start is None else self.dispatch(node.start)
+        end = "" if node.end is None else self.dispatch(node.end)
+        return f"{self.dispatch(node.this)}[{start}..{end}]"
+
+    def render_LabelPredicate(self, node: a.LabelPredicate) -> str:
+        return f"{self.dispatch(node.this)}{self.dispatch(node.labels)}"
 
     def render_PatternPredicate(self, node: a.PatternPredicate) -> str:
         body = self.dispatch(node.pattern)
@@ -440,9 +466,16 @@ class Renderer:
             body += f" | {self.dispatch(node.projection)}"
         return f"[{body}]"
 
+    def render_Quantifier(self, node: a.Quantifier) -> str:
+        body = f"{self.dispatch(node.variable)} IN {self.dispatch(node.source)}"
+        if node.where:
+            body += f" WHERE {self.dispatch(node.where)}"
+        return f"{node.name}({body})"
+
     def render_PatternComprehension(self, node: a.PatternComprehension) -> str:
+        prefix = f"{self.dispatch(node.variable)} = " if node.variable else ""
         body = self.dispatch(node.pattern)
         if node.where:
             body += f" WHERE {self.dispatch(node.where.this if isinstance(node.where, a.Where) else node.where)}"
         body += f" | {self.dispatch(node.projection)}"
-        return f"[{body}]"
+        return f"[{prefix}{body}]"

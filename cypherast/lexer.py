@@ -104,6 +104,10 @@ class TokenKind(Enum):
     COLLECT = auto()
     SHORTESTPATH = auto()
     ALLSHORTESTPATHS = auto()
+    CYPHER = auto()
+    ANY = auto()
+    NONE = auto()
+    SINGLE = auto()
     # GQL extras (parse-tolerant)
     NEXT = auto()
     INSERT = auto()
@@ -134,6 +138,9 @@ KEYWORDS: dict[str, TokenKind] = {
     "DISTINCT": TokenKind.DISTINCT,
     "UNION": TokenKind.UNION,
     "ALL": TokenKind.ALL,
+    "ANY": TokenKind.ANY,
+    "NONE": TokenKind.NONE,
+    "SINGLE": TokenKind.SINGLE,
     "CREATE": TokenKind.CREATE,
     "MERGE": TokenKind.MERGE,
     "SET": TokenKind.SET,
@@ -164,6 +171,7 @@ KEYWORDS: dict[str, TokenKind] = {
     "SCAN": TokenKind.SCAN,
     "JOIN": TokenKind.JOIN,
     "CALL": TokenKind.CALL,
+    "CYPHER": TokenKind.CYPHER,
     "YIELD": TokenKind.YIELD,
     "EXISTS": TokenKind.EXISTS,
     "COUNT": TokenKind.COUNT,
@@ -307,7 +315,16 @@ class Lexer:
             ch = self._advance()
             if ch == "\\" and not self._eof():
                 esc = self._advance()
-                escapes = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", "'": "'", '"': '"', "b": "\b", "f": "\f"}
+                escapes = {
+                    "n": "\n",
+                    "t": "\t",
+                    "r": "\r",
+                    "\\": "\\",
+                    "'": "'",
+                    '"': '"',
+                    "b": "\b",
+                    "f": "\f",
+                }
                 buf.append(escapes.get(esc, esc))
                 continue
             if ch == quote:

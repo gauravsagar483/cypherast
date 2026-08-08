@@ -126,11 +126,7 @@ def ensure_labelled_nodes(
                     for ls in left_labs:
                         for rs in right_labs:
                             # OUTGOING and BOTH: record left→right as start→end
-                            pair = (
-                                (rs, ls)
-                                if d is a.Direction.INCOMING
-                                else (ls, rs)
-                            )
+                            pair = (rs, ls) if d is a.Direction.INCOMING else (ls, rs)
                             if pair not in rd.endpoints:
                                 rd.endpoints.append(pair)
             i += 2

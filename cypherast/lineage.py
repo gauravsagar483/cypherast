@@ -121,9 +121,7 @@ def lineage(
             )
         return _to_node(binding, projections[binding], ret, on_node=on_node)
 
-    return {
-        name: _to_node(name, expr, ret, on_node=on_node) for name, expr in projections.items()
-    }
+    return {name: _to_node(name, expr, ret, on_node=on_node) for name, expr in projections.items()}
 
 
 def _find_return(node: a.AstNode) -> a.Return | None:

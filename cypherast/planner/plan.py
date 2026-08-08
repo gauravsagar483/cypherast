@@ -120,9 +120,7 @@ def _plan_match(
                 chain = op
             i += 2
     if clause.where:
-        f = ops.Filter(
-            clause.where.this.cypher() if hasattr(clause.where.this, "cypher") else ""
-        )
+        f = ops.Filter(clause.where.this.cypher() if hasattr(clause.where.this, "cypher") else "")
         f.children = [chain]
         chain = f
     return chain

@@ -71,9 +71,7 @@ class Dialect:
         return rules.apply(tree, copy=False, schema=schema)
 
     @classmethod
-    def validate(
-        cls, tree: a.AstNode, schema: object | None = None
-    ) -> list[ConstraintIssue]:
+    def validate(cls, tree: a.AstNode, schema: object | None = None) -> list[ConstraintIssue]:
         """List remaining capability / schema violations (empty = OK)."""
         return validate_capabilities(tree, cls.capabilities, schema=schema)
 

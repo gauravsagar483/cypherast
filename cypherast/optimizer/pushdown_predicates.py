@@ -18,9 +18,7 @@ def pushdown_predicates(tree: a.AstNode, schema: object | None = None) -> a.AstN
     return tree.transform(_fix, copy=False)
 
 
-def _try_fold(
-    pred: a.AstNode, pattern: a.Pattern
-) -> tuple[a.AstNode | None, bool]:
+def _try_fold(pred: a.AstNode, pattern: a.Pattern) -> tuple[a.AstNode | None, bool]:
     if isinstance(pred, a.And):
         left, f1 = _try_fold(pred.this, pattern)
         right, f2 = _try_fold(pred.expression, pattern)
@@ -66,9 +64,7 @@ def _inject_prop(pattern: a.Pattern, var: str, prop: str, value: a.AstNode) -> b
                 and isinstance(el.variable, a.Identifier)
                 and el.variable.this == var
             ):
-                entries = (
-                    list(el.properties.entries) if isinstance(el.properties, a.Map) else []
-                )
+                entries = list(el.properties.entries) if isinstance(el.properties, a.Map) else []
                 if any(k == prop for k, _ in entries):
                     return False
                 entries.append((prop, value))

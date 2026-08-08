@@ -28,7 +28,7 @@ assert tree.cypher().startswith("MATCH")
 stmts = cypherast.parse("RETURN 1")
 ```
 
-Dialects: `opencypher` (default), `neo4j`, `memgraph`, `puppygraph`.
+Dialects: `opencypher` / `opencypher9` (openCypher 9 baseline; default), `neo4j`, `memgraph`, `puppygraph`.
 
 ### Procedure `CALL` vs subquery `CALL`
 
@@ -159,9 +159,11 @@ Accepts either Cypher text or an existing `AstNode`.
 
 List remaining capability / schema issues for a dialect (empty = OK). Prefer
 `optimize(..., write=dialect)` first when you want rewrites applied; raw validate
-flags issues on the input as-is.
+flags issues on the input as-is. The `opencypher` dialect emits **CG15xx** codes
+for OC9 conformance (comparability, functions, patterns, clauses).
 
 ```python
+issues = cypherast.validate(q, dialect="opencypher")
 issues = cypherast.validate(q, dialect="puppygraph")
 issues = cypherast.validate(q, dialect="puppygraph", schema=schema)
 ```

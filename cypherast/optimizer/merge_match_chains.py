@@ -36,9 +36,7 @@ def merge_match_chains(tree: a.AstNode, schema: object | None = None) -> a.AstNo
                 nxt = clauses[i + 1]
                 chained = _stitch_patterns(cur.pattern, nxt.pattern)
                 if chained is not None:
-                    new_clauses.append(
-                        a.Match(pattern=chained, optional=None, where=None)
-                    )
+                    new_clauses.append(a.Match(pattern=chained, optional=None, where=None))
                     i += 2
                     continue
             new_clauses.append(cur)

@@ -11,7 +11,9 @@ from cypherast.dialects.validate.aggregates import (
 )
 from cypherast.dialects.validate.cartesian import _cartesian_matches
 from cypherast.dialects.validate.case_arms import _mismatched_case_arms
+from cypherast.dialects.validate.comparability import comparability_issues
 from cypherast.dialects.validate.exists_fn import _exists_function_calls
+from cypherast.dialects.validate.functions import _function_signature_issues
 from cypherast.dialects.validate.id_predicates import _id_in_string_predicates
 from cypherast.dialects.validate.issues import ConstraintIssue
 from cypherast.dialects.validate.list_ops import (
@@ -19,6 +21,15 @@ from cypherast.dialects.validate.list_ops import (
     _node_in_list_membership,
 )
 from cypherast.dialects.validate.nulls_order import _nulls_order_modifiers
+from cypherast.dialects.validate.opencypher import (
+    _reject_call_subquery,
+    _reject_excluded_clauses,
+    _reject_gql_nodes,
+    _reject_quantified_path,
+    _reject_undirected_patterns,
+    _reject_using_hints,
+    _reject_var_length_binding,
+)
 from cypherast.dialects.validate.optional_scalar import _unguarded_optional_scalar_use
 from cypherast.dialects.validate.pattern_predicates import _pattern_predicate_bindings
 from cypherast.dialects.validate.schema_props import (
@@ -85,22 +96,18 @@ def validate_capabilities(
         issues.extend(_id_in_string_predicates(tree))
     if not caps.allow_unguarded_optional_scalar_use:
         issues.extend(
-            _unguarded_optional_scalar_use(
-                tree, risky_functions=caps.optional_risky_functions
-            )
+            _unguarded_optional_scalar_use(tree, risky_functions=caps.optional_risky_functions)
         )
     if not caps.allow_mismatched_case_arms:
         issues.extend(_mismatched_case_arms(tree))
     if not caps.allow_nulls_order_modifiers:
         issues.extend(_nulls_order_modifiers(tree))
-    if not caps.allow_exists_function:
+    if not caps.allow_exists_function and not caps.check_function_signatures:
         issues.extend(_exists_function_calls(tree))
     if not caps.allow_distinct_with_aggregate:
         issues.extend(_distinct_with_aggregate(tree))
     if caps.max_collect_distinct_per_clause is not None:
-        issues.extend(
-            _too_many_collect_distinct(tree, caps.max_collect_distinct_per_clause)
-        )
+        issues.extend(_too_many_collect_distinct(tree, caps.max_collect_distinct_per_clause))
     if not caps.allow_collect_distinct_with_other_aggregates:
         issues.extend(_collect_distinct_with_other_aggregates(tree))
     if caps.require_matching_union_columns:
@@ -109,6 +116,24 @@ def validate_capabilities(
         issues.extend(_undefined_variables(tree))
     if not caps.pattern_predicate_introduces_bindings:
         issues.extend(_pattern_predicate_bindings(tree))
+    if caps.reject_excluded_clauses:
+        issues.extend(_reject_excluded_clauses(tree))
+    if caps.reject_call_subquery:
+        issues.extend(_reject_call_subquery(tree))
+    if caps.reject_gql_nodes:
+        issues.extend(_reject_gql_nodes(tree))
+    if caps.reject_undirected_patterns:
+        issues.extend(_reject_undirected_patterns(tree))
+    if caps.reject_var_length_binding:
+        issues.extend(_reject_var_length_binding(tree))
+    if caps.reject_quantified_path:
+        issues.extend(_reject_quantified_path(tree))
+    if caps.reject_using_hints:
+        issues.extend(_reject_using_hints(tree))
+    if caps.check_function_signatures:
+        issues.extend(_function_signature_issues(tree))
+    if caps.check_comparability:
+        issues.extend(comparability_issues(tree))
     gs = ensure_schema(schema)
     if gs is not None:
         issues.extend(_schema_unknown_types(tree, gs))
@@ -126,22 +151,32 @@ def raise_if_invalid(
     if not issues:
         return
     first = issues[0]
+    known = {
+        "CG1201",
+        "CG1202",
+        "CG1203",
+        "CG1301",
+        "CG1302",
+        "CG1303",
+        "CG1304",
+        "CG1305",
+        "CG1401",
+        "CG1402",
+        "CG1501",
+        "CG1502",
+        "CG1503",
+        "CG1504",
+        "CG1505",
+        "CG1506",
+        "CG1507",
+        "CG1508",
+        "CG1509",
+        "CG1510",
+        "CG1511",
+        "CG1512",
+    }
     raise ValidationError(
         first.message,
-        code=first.code
-        if first.code
-        in {
-            "CG1201",
-            "CG1202",
-            "CG1203",
-            "CG1301",
-            "CG1302",
-            "CG1303",
-            "CG1304",
-            "CG1305",
-            "CG1401",
-            "CG1402",
-        }
-        else "CG1401",
+        code=first.code if first.code in known else "CG1401",
         hint=first.hint or (f"+{len(issues) - 1} more" if len(issues) > 1 else None),
     )

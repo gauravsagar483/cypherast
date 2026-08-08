@@ -64,6 +64,12 @@ def test_optimize_transpile_directional(
     qid: str, cypher: str, from_: str, to_: str
 ) -> None:
     """optimize=True uses TARGET dialect caps only."""
+    if qid in {"mg-call-cartesian", "mg-call-with"} and to_ in {
+        "opencypher",
+        "puppygraph",
+        "opencypher9",
+    }:
+        pytest.skip("openCypher 9 rejects CALL subqueries")
     out = cypherast.transpile(cypher, from_=from_, to_=to_, optimize=True)
     assert "MATCH" in out.upper() or "CALL" in out.upper() or "UNWIND" in out.upper()
     # Round-trip parse in target

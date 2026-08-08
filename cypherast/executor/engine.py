@@ -24,6 +24,8 @@ class Result:
         return len(self.rows)
 
 
+_PATH_ACC = "__path_acc__"
+
 Row = dict[str, t.Any]
 
 
@@ -49,11 +51,15 @@ class Engine:
         self.params = params
 
     def run_union(self, node: a.Union) -> Result:
-        left = self.run_query(node.this) if isinstance(node.this, a.Query) else execute(
-            a.Cypher(this=node.this), self.graph, params=self.params
+        left = (
+            self.run_query(node.this)
+            if isinstance(node.this, a.Query)
+            else execute(a.Cypher(this=node.this), self.graph, params=self.params)
         )
-        right = self.run_query(node.expression) if isinstance(node.expression, a.Query) else execute(
-            a.Cypher(this=node.expression), self.graph, params=self.params
+        right = (
+            self.run_query(node.expression)
+            if isinstance(node.expression, a.Query)
+            else execute(a.Cypher(this=node.expression), self.graph, params=self.params)
         )
         rows = list(left.rows) + list(right.rows)
         if node.distinct:
@@ -91,9 +97,7 @@ class Engine:
                         rows = [
                             r
                             for r in rows
-                            if cypher_true(
-                                eval_expr(clause.where.this, self._env(r))
-                            )
+                            if cypher_true(eval_expr(clause.where.this, self._env(r)))
                         ]
                 else:
                     rows = self._project(clause, rows, is_with=True)
@@ -119,13 +123,13 @@ class Engine:
                 if isinstance(inner, a.Query):
                     self.run_query(inner)
                 rows = rows
+            elif isinstance(clause, a.CallProcedure):
+                rows = self._call_procedure(clause, rows)
             elif isinstance(clause, a.Return):
                 result_cols, result_rows = self._return(clause, rows)
                 rows = []  # done
             else:
-                raise ExecuteError(
-                    f"Unsupported clause {type(clause).__name__}", code="CG1702"
-                )
+                raise ExecuteError(f"Unsupported clause {type(clause).__name__}", code="CG1702")
         return Result(columns=result_cols, rows=result_rows)
 
     def _env(self, row: Row) -> Env:
@@ -166,6 +170,19 @@ class Engine:
         elems = path.elements
         if not elems:
             return [row]
+        if len(elems) == 1 and isinstance(elems[0], a.ShortestPath):
+            inner = elems[0].this
+            if isinstance(inner, a.PathPattern):
+                inner_path = a.PathPattern(
+                    variable=path.variable or inner.variable,
+                    elements=inner.elements,
+                )
+                all_rows = self._match_path(inner_path, row)
+                if not all_rows:
+                    return []
+                scored = [(self._hop_count(inner, m), m) for m in all_rows]
+                min_h = min(h for h, _ in scored)
+                return [m for h, m in scored if h == min_h]
         # Start with candidate nodes for first NodePattern
         first = elems[0]
         if not isinstance(first, a.NodePattern):
@@ -183,11 +200,18 @@ class Engine:
                     if bound is not node:
                         continue
                 r0[name] = node
-            rows.extend(self._expand(elems[1:], r0, node))
+            if path.variable:
+                r0[_PATH_ACC] = [node]
+            expanded = self._expand(elems[1:], r0, node, track_path=path.variable is not None)
+            if path.variable:
+                for r1 in expanded:
+                    acc = r1.pop(_PATH_ACC, [])
+                    r1[path.variable.this] = acc
+            rows.extend(expanded)
         return rows
 
     def _expand(
-        self, elems: list[a.AstNode], row: Row, current: Node
+        self, elems: list[a.AstNode], row: Row, current: Node, *, track_path: bool = False
     ) -> list[Row]:
         if not elems:
             return [row]
@@ -216,9 +240,12 @@ class Engine:
                     bound = r1[name]
                     if is_null(bound):
                         continue
-                    if rel is not None and bound is not rel:
+                    if isinstance(rel, list):
+                        if bound is not rel:
+                            continue
+                    elif rel is not None and bound is not rel:
                         continue
-                if rel is not None:
+                if isinstance(rel, list) or rel is not None:
                     r1[name] = rel
                 else:
                     r1[name] = NULL
@@ -231,7 +258,13 @@ class Engine:
                     if bound is not other:
                         continue
                 r1[name] = other
-            out.extend(self._expand(rest, r1, other))
+            if track_path and _PATH_ACC in r1:
+                acc = list(r1[_PATH_ACC])
+                if rel is not None:
+                    acc.append(rel)
+                acc.append(other)
+                r1[_PATH_ACC] = acc
+            out.extend(self._expand(rest, r1, other, track_path=track_path))
         return out
 
     def _candidate_nodes(self, pat: a.NodePattern, row: Row) -> list[Node]:
@@ -265,10 +298,10 @@ class Engine:
 
     def _candidate_rels(
         self, pat: a.RelationshipPattern, current: Node
-    ) -> list[tuple[Relationship | None, Node]]:
+    ) -> list[tuple[Relationship | list[Relationship] | None, Node]]:
         types = pat.types
         typ = types[0] if types and len(types) == 1 else None
-        out: list[tuple[Relationship | None, Node]] = []
+        out: list[tuple[Relationship | list[Relationship] | None, Node]] = []
 
         def add(rel: Relationship, other_id: int) -> None:
             if types and rel.type not in types:
@@ -290,18 +323,26 @@ class Engine:
         if pat.variable_length:
             min_h = pat.min_hops if pat.min_hops is not None else 1
             max_h = pat.max_hops if pat.max_hops is not None else 10
-            out.extend(self._var_expand(current, pat, min_h, max_h))
+            for rel_path, other in self._var_expand(current, pat, min_h, max_h):
+                out.append((rel_path, other))
             return out
 
+        seen_rels: set[int] = set()
         if pat.direction in (a.Direction.OUTGOING, a.Direction.BOTH):
             for rel in self.graph.out_rels(current.id, typ if typ else None):
                 if not typ and types and rel.type not in types:
                     continue
+                if pat.direction is a.Direction.BOTH and rel.id in seen_rels:
+                    continue
+                seen_rels.add(rel.id)
                 add(rel, rel.end)
         if pat.direction in (a.Direction.INCOMING, a.Direction.BOTH):
             for rel in self.graph.in_rels(current.id, typ if typ else None):
                 if not typ and types and rel.type not in types:
                     continue
+                if pat.direction is a.Direction.BOTH and rel.id in seen_rels:
+                    continue
+                seen_rels.add(rel.id)
                 add(rel, rel.start)
         return out
 
@@ -311,24 +352,19 @@ class Engine:
         pat: a.RelationshipPattern,
         min_h: int,
         max_h: int,
-    ) -> list[tuple[Relationship | None, Node]]:
-        """Yield (last_rel_or_None, end_node) for path lengths in [min_h, max_h].
-
-        ``min_h == 0`` includes the 0-hop self row with ``last_rel is None``.
-        """
-        results: list[tuple[Relationship | None, Node]] = []
+    ) -> list[tuple[list[Relationship], Node]]:
+        """Yield (rel_path, end_node) for path lengths in [min_h, max_h]."""
+        results: list[tuple[list[Relationship], Node]] = []
         from collections import deque
 
-        q: deque[tuple[Node, int, Relationship | None, set[int]]] = deque(
-            [(start, 0, None, set())]
-        )
+        q: deque[tuple[Node, int, list[Relationship], set[int]]] = deque([(start, 0, [], set())])
         while q:
-            node, depth, last_rel, visited = q.popleft()
+            node, depth, rel_path, visited = q.popleft()
             if depth >= min_h:
-                if last_rel is not None:
-                    results.append((last_rel, node))
-                elif depth == 0:
-                    results.append((None, node))
+                if depth == 0 and min_h == 0:
+                    results.append(([], node))
+                elif rel_path:
+                    results.append((rel_path, node))
             if depth >= max_h:
                 continue
             candidates: list[Relationship] = []
@@ -336,17 +372,62 @@ class Engine:
                 candidates.extend(self.graph.out_rels(node.id))
             if pat.direction in (a.Direction.INCOMING, a.Direction.BOTH):
                 candidates.extend(self.graph.in_rels(node.id))
+            seen_step: set[int] = set()
             for rel in candidates:
-                if rel.id in visited:
+                if rel.id in visited or rel.id in seen_step:
                     continue
                 if pat.types and rel.type not in pat.types:
                     continue
+                seen_step.add(rel.id)
                 other_id = rel.end if rel.start == node.id else rel.start
                 other = self.graph.nodes.get(other_id)
                 if other is None:
                     continue
-                q.append((other, depth + 1, rel, visited | {rel.id}))
+                q.append((other, depth + 1, rel_path + [rel], visited | {rel.id}))
         return results
+
+    def _hop_count(self, path: a.PathPattern, row: Row) -> int:
+        if path.variable and path.variable.this in row:
+            p = row[path.variable.this]
+            if isinstance(p, list):
+                return sum(1 for x in p if isinstance(x, Relationship))
+        count = 0
+        for elem in path.elements:
+            if (
+                isinstance(elem, a.RelationshipPattern)
+                and elem.variable
+                and not is_null(row.get(elem.variable.this))
+            ):
+                count += 1
+        return count
+
+    def _call_procedure(self, clause: a.CallProcedure, rows: list[Row]) -> list[Row]:
+        from cypherast.executor.procedures import run_procedure
+
+        out: list[Row] = []
+        for row in rows:
+            args = [eval_expr(e, self._env(row)) for e in clause.expressions]
+            proc_rows = run_procedure(clause.name, self.graph, args)
+            if not proc_rows:
+                proc_rows = [{}]
+            for pr in proc_rows:
+                merged = {**row}
+                if clause.yield_:
+                    yield_exprs = clause.yield_.expressions or []
+                    if len(yield_exprs) == 1 and isinstance(yield_exprs[0], a.Star):
+                        merged.update(pr)
+                    else:
+                        for item in yield_exprs:
+                            if isinstance(item, a.Alias) and isinstance(item.this, a.Identifier):
+                                merged[item.alias.this] = pr.get(item.this.this, NULL)
+                            elif isinstance(item, a.Identifier):
+                                merged[item.this] = pr.get(item.this, NULL)
+                if clause.where is not None and not cypher_true(
+                    eval_expr(clause.where.this, self._env(merged))
+                ):
+                    continue
+                out.append(merged)
+        return out if out else [{}]
 
     def _project(self, clause: a.With | a.Return, rows: list[Row], is_with: bool) -> list[Row]:
         paired: list[tuple[Row, Row]] = []
@@ -522,7 +603,9 @@ class Engine:
                 props[k] = eval_expr(v, env)
         if pat.direction is a.Direction.INCOMING:
             start, end = end, start
-        return self.graph.create_rel(start, end, typ, **{k: v for k, v in props.items() if v is not NULL})
+        return self.graph.create_rel(
+            start, end, typ, **{k: v for k, v in props.items() if v is not NULL}
+        )
 
     def _merge(self, clause: a.Merge, rows: list[Row]) -> list[Row]:
         out: list[Row] = []
@@ -564,6 +647,14 @@ class Engine:
                                 obj.props.pop(target.name, None)
                             else:
                                 obj.props[target.name] = val
+                elif isinstance(target, a.NodePattern) and target.labels is not None:
+                    var = target.variable
+                    if isinstance(var, a.Identifier):
+                        obj = row.get(var.this)
+                        if isinstance(obj, Node) and isinstance(target.labels, a.LabelExpression):
+                            for lab in target.labels.labels or []:
+                                obj.labels.add(lab)
+                                self.graph._by_label.setdefault(lab, set()).add(obj.id)
                 elif isinstance(target, a.Identifier):
                     # SET n = map or SET n:Label — labels via LabelExpression not modeled on left
                     obj = row.get(target.this)
@@ -593,20 +684,14 @@ class Engine:
                     obj = eval_expr(item.this, env)
                     if isinstance(obj, (Node, Relationship)):
                         obj.props.pop(item.name, None)
-                elif isinstance(item, a.RemoveLabels) and isinstance(
-                    item.this, a.Identifier
-                ):
+                elif isinstance(item, a.RemoveLabels) and isinstance(item.this, a.Identifier):
                     obj = row.get(item.this.this)
-                    if isinstance(obj, Node) and isinstance(
-                        item.labels, a.LabelExpression
-                    ):
+                    if isinstance(obj, Node) and isinstance(item.labels, a.LabelExpression):
                         for lab in item.labels.labels or []:
                             obj.labels.discard(lab)
                             if lab in self.graph._by_label:
                                 self.graph._by_label[lab].discard(obj.id)
-                elif isinstance(item, a.NodePattern) and isinstance(
-                    item.variable, a.Identifier
-                ):
+                elif isinstance(item, a.NodePattern) and isinstance(item.variable, a.Identifier):
                     # Legacy NodePattern form (pre-RemoveLabels)
                     obj = row.get(item.variable.this)
                     if isinstance(obj, Node) and isinstance(item.labels, a.LabelExpression):
@@ -626,9 +711,7 @@ class Engine:
                 continue
             items = list(seq) if not isinstance(seq, (str, bytes)) else list(seq)
             var_name = (
-                clause.variable.this
-                if isinstance(clause.variable, a.Identifier)
-                else "_foreach"
+                clause.variable.this if isinstance(clause.variable, a.Identifier) else "_foreach"
             )
             current = dict(row)
             for item in items:
@@ -671,6 +754,8 @@ def _proj_name(expr: a.AstNode) -> str:
     if isinstance(expr, a.Identifier):
         return str(expr.this)
     if isinstance(expr, a.Property):
+        if isinstance(expr.this, a.Identifier):
+            return f"{expr.this.this}.{expr.name}"
         return str(expr.name)
     if isinstance(expr, a.FunctionCall):
         return str(expr.name).lower()
@@ -680,7 +765,18 @@ def _proj_name(expr: a.AstNode) -> str:
 def _is_agg(expr: a.AstNode) -> bool:
     node = expr.this if isinstance(expr, a.Alias) else expr
     if isinstance(node, a.FunctionCall):
-        return node.name.lower() in {"count", "sum", "avg", "min", "max", "collect"}
+        return node.name.lower() in {
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "collect",
+            "stdev",
+            "stdevp",
+            "percentilecont",
+            "percentiledisc",
+        }
     return False
 
 
@@ -710,6 +806,30 @@ def _eval_agg(expr: a.AstNode, rows: list[Row], engine: Engine) -> t.Any:
         return max(vals) if vals else NULL
     if name == "collect":
         return vals
+    if name == "stdev" and len(vals) >= 2:
+        mean = sum(vals) / len(vals)
+        var = sum((x - mean) ** 2 for x in vals) / (len(vals) - 1)
+        return var**0.5
+    if name == "stdevp" and vals:
+        mean = sum(vals) / len(vals)
+        var = sum((x - mean) ** 2 for x in vals) / len(vals)
+        return var**0.5
+    if name in ("percentilecont", "percentiledisc") and len(node.expressions) >= 2:
+        pct = eval_expr(node.expressions[0], engine._env(rows[0]))
+        if is_null(pct):
+            return NULL
+        pct = float(pct)
+        sorted_vals = sorted(vals)
+        if not sorted_vals:
+            return NULL
+        if name == "percentiledisc":
+            idx = int(round(pct * (len(sorted_vals) - 1)))
+            return sorted_vals[max(0, min(idx, len(sorted_vals) - 1))]
+        rank = pct * (len(sorted_vals) - 1)
+        lo = int(rank)
+        hi = min(lo + 1, len(sorted_vals) - 1)
+        frac = rank - lo
+        return sorted_vals[lo] + frac * (sorted_vals[hi] - sorted_vals[lo])
     raise ExecuteError(f"Unknown agg {name}", code="CG1702")
 
 
@@ -749,10 +869,7 @@ def _order_paired(
         reverse=bool(ordered.desc),
     )
 
-    nulls_first = (
-        ordered.nulls == "FIRST"
-        or (ordered.nulls is None and ordered.desc)
-    )
+    nulls_first = ordered.nulls == "FIRST" or (ordered.nulls is None and ordered.desc)
     if nulls_first:
         return nulls + rest
     return rest + nulls

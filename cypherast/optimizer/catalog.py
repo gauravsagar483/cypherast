@@ -64,9 +64,7 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
 
         def _bound(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
             _ = schema
-            return bound_variable_length(
-                tree, max_hops=max_hops, allow_unbounded=allow_unbounded
-            )
+            return bound_variable_length(tree, max_hops=max_hops, allow_unbounded=allow_unbounded)
 
         rules.append(Rule("bound_variable_length", _bound))
 
@@ -78,10 +76,7 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
 
         rules.append(Rule("split_multi_path_match", _split))
 
-    if (
-        not caps.allow_distinct_with_aggregate
-        and caps.rewrite_distinct_beside_aggregate
-    ):
+    if not caps.allow_distinct_with_aggregate and caps.rewrite_distinct_beside_aggregate:
 
         def _distinct(tree: a.AstNode, schema: object | None = None) -> a.AstNode:
             _ = schema
@@ -89,10 +84,7 @@ def constraint_rules(caps: DialectCapabilities) -> RuleSet:
 
         rules.append(Rule("drop_distinct_beside_aggregate", _distinct))
 
-    if (
-        caps.rewrite_collect_distinct_cap
-        and caps.max_collect_distinct_per_clause is not None
-    ):
+    if caps.rewrite_collect_distinct_cap and caps.max_collect_distinct_per_clause is not None:
         max_n = caps.max_collect_distinct_per_clause
 
         def _collect(tree: a.AstNode, schema: object | None = None) -> a.AstNode:

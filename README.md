@@ -158,6 +158,8 @@ make translate Q="MATCH (n:Person) RETURN n" FROM=opencypher TO=puppygraph OPT=1
 
 `opencypher` · `neo4j` · `memgraph` · `puppygraph` (read+write). Gremlin/GQL generators = v1.x.
 
+openCypher 9 spec: [openCypher9.pdf](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
+
 `puppygraph` subclasses openCypher and applies engine capability constraints on optimize/translate
 (labelled MATCH, no Cartesian multi-path MATCH, strip `NULLS FIRST/LAST`, FET-45 null CASE, etc.).
 Does **not** inject `LIMIT` or enforce hop caps (leave those to the engine / query_guard).
@@ -174,15 +176,29 @@ cypherast.validate(q, dialect="puppygraph", schema=schema)  # schema= optional
 
 ## TCK scoreboard
 
-Sample openCypher-style `.feature` files live under `tests/tck/features/`. Runner reports parse-rate:
+Official [openCypher TCK](https://github.com/opencypher/openCypher/tree/master/tck) is **not vendored**. The runner clones it to `/tmp/opencypher` and writes `tests/tck/results.md`:
 
 ```bash
-uv run pytest tests/tck -q
+make test-tck-official          # parse + in-memory executor
+make test-tck-official-parse    # parse gate only
+make test-tck-oc9             # OC9-excluded scenario filter
 ```
+
+Override feature path: `CYPHERAST_TCK_PATH=/path/to/tck/features`.
+
+Recent scores (runnable scenarios exclude Cucumber Scenario Outline placeholders):
+
+| Gate | Rate |
+|------|------|
+| Parse (1,339 real queries) | ~95% |
+| Run (executable only) | ~62% |
+| Effective run (+ expected errors) | ~65% |
+
+**Run rate notes:** The runner skips outlines, side-effect checks, unparseable queries, and procedure stubs. Scenarios that expect compile/runtime errors count as passes when cypherast rejects the query (`expected` bucket).
 
 ## Status
 
-v0.1.8 — procedure `CALL` parse/render (`CallProcedure`); YIELD in-scope for strict optimize.
+v0.1.9 — openCypher 9 validation (CG1501–CG1512); official TCK runner (~95% parse); multidialect regression; PuppyGraph bound var-length rels.
 
 ## CI
 

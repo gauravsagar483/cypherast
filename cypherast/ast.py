@@ -220,6 +220,12 @@ class Property(AstNode):
     arg_types = {"this": True, "name": True}
 
 
+class LabelPredicate(AstNode):
+    """``n:Label`` node label or relationship type predicate in expressions."""
+
+    arg_types = {"this": True, "labels": True}
+
+
 class Map(AstNode):
     arg_types = {"entries": True}  # list[(key, value)]
 
@@ -232,6 +238,12 @@ class ListSubscript(AstNode):
     """``expr[index]`` — Cypher list/string indexing (0-based in openCypher)."""
 
     arg_types = {"this": True, "index": True}
+
+
+class ListSlice(AstNode):
+    """``expr[start..end]`` or ``expr[start..]`` list slice."""
+
+    arg_types = {"this": True, "start": False, "end": False}
 
 
 class Range(AstNode):
@@ -352,6 +364,12 @@ class Coalesce(AstNode):
 
 class ListComprehension(AstNode):
     arg_types = {"variable": True, "source": True, "where": False, "projection": False}
+
+
+class Quantifier(AstNode):
+    """``all/any/none/single(x IN list WHERE pred)``."""
+
+    arg_types = {"name": True, "variable": True, "source": True, "where": False}
 
 
 class PatternComprehension(AstNode):
@@ -496,7 +514,7 @@ class Set(AstNode):
 
 
 class SetItem(AstNode):
-    arg_types = {"this": True, "expression": True, "op": False}  # = or +=
+    arg_types = {"this": True, "expression": False, "op": False}  # = or +=
 
 
 class Delete(AstNode):
@@ -547,7 +565,7 @@ class Query(AstNode):
 class Cypher(AstNode):
     """Top-level statement (may be a Query or Union)."""
 
-    arg_types = {"this": True}
+    arg_types = {"this": True, "version": False}
 
 
 # ---------------------------------------------------------------------------

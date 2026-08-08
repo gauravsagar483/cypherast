@@ -15,9 +15,7 @@ def _collect_distinct_with_other_aggregates(tree: a.AstNode) -> list[ConstraintI
         for expr in exprs:
             cores.append(expr.this if isinstance(expr, a.Alias) else expr)
         has_collect_d = any(
-            isinstance(c, a.FunctionCall)
-            and str(c.name).lower() == "collect"
-            and c.distinct
+            isinstance(c, a.FunctionCall) and str(c.name).lower() == "collect" and c.distinct
             for c in cores
         )
         if not has_collect_d:
@@ -38,6 +36,7 @@ def _collect_distinct_with_other_aggregates(tree: a.AstNode) -> list[ConstraintI
                 )
             ]
     return []
+
 
 def _distinct_with_aggregate(tree: a.AstNode) -> list[ConstraintIssue]:
     for n in tree.find_all(a.With, a.Return):

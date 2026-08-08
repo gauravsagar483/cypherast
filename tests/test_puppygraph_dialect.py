@@ -10,6 +10,13 @@ from cypherast.schema import GraphSchema
 
 def test_capabilities_flags():
     caps = PuppyGraph.capabilities
+    assert caps.reject_excluded_clauses
+    assert caps.check_function_signatures
+    assert caps.reject_undirected_patterns
+    assert not caps.reject_var_length_binding
+    assert caps.reject_call_subquery
+    assert caps.reject_gql_nodes
+    assert caps.reject_quantified_path
     assert caps.require_labelled_nodes
     assert not caps.allow_cartesian_match_paths
     assert caps.max_var_length_hops is None
@@ -28,6 +35,19 @@ def test_capabilities_flags():
     assert caps.rewrite_unguarded_optional_scalar_use
     assert not caps.rewrite_cartesian_match_paths
     assert not caps.rewrite_distinct_beside_aggregate
+
+
+def test_validate_bound_var_length_rel_ok():
+    """PuppyGraph allows bound var-length rels (OC9 CG1504 does not)."""
+    for q in (
+        "MATCH ()-[r*1..2]->() RETURN r LIMIT 20",
+        "MATCH (affected:Metric)-[_r_3:DERIVED_FROM*0..3]->(anchor:Metric) "
+        "RETURN DISTINCT affected.name AS affected_metric LIMIT 20",
+    ):
+        issues = cypherast.validate(q, dialect="puppygraph")
+        assert not any(i.code == "CG1504" for i in issues)
+        opt = cypherast.optimize(q, write="puppygraph")
+        assert not any(i.code == "CG1504" for i in cypherast.validate(opt, dialect="puppygraph"))
 
 
 def test_first_last_as_identifiers_and_nulls_order():
@@ -295,16 +315,17 @@ def test_optimize_bare_residual_node():
     assert not any(i.code == "CG1402" for i in cypherast.validate(opt, dialect="puppygraph"))
 
 
-def test_call_subquery_return_in_scope():
-    """CALL { … RETURN x } exports x for outer RETURN (CG1201)."""
+def test_call_subquery_rejected_by_oc9():
+    """OC9 (and PuppyGraph) reject CALL { … } subqueries."""
     q = (
         "MATCH (p:Person) CALL { MATCH (a:Animal) RETURN a.name AS animal_name } "
         "RETURN p.name AS person_name, animal_name"
     )
-    opt = cypherast.optimize(q, write="puppygraph")
-    assert "animal_name" in opt.cypher(dialect="puppygraph")
     issues = cypherast.validate(q, dialect="puppygraph")
-    assert not any(i.code == "CG1201" for i in issues)
+    assert any(i.code == "CG1505" for i in issues)
+    with pytest.raises(ValidationError) as ei:
+        cypherast.optimize(q, write="puppygraph")
+    assert ei.value.code == "CG1505"
 
 
 def test_optimize_mines_labels_from_lineage_query():

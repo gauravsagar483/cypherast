@@ -10,10 +10,7 @@ def _id_in_string_predicates(tree: a.AstNode) -> list[ConstraintIssue]:
     """Bare id()/elementId() compared as a string (CONTAINS / STARTS/ENDS / = / <>)."""
 
     def _is_id_call(n: a.AstNode | None) -> bool:
-        return (
-            isinstance(n, a.FunctionCall)
-            and str(n.name).lower() in {"id", "elementid"}
-        )
+        return isinstance(n, a.FunctionCall) and str(n.name).lower() in {"id", "elementid"}
 
     def _is_string_lit(n: a.AstNode | None) -> bool:
         return isinstance(n, a.String) or (

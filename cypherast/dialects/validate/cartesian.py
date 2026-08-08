@@ -73,11 +73,7 @@ def _cartesian_matches(tree: a.AstNode) -> list[ConstraintIssue]:
         for clause in q.clauses or []:
             if isinstance(clause, a.Match) and not clause.optional:
                 here = _pattern_vars(clause.pattern)
-                if (
-                    prev_vars is not None
-                    and here
-                    and not (here & prev_vars)
-                ):
+                if prev_vars is not None and here and not (here & prev_vars):
                     issues.append(
                         ConstraintIssue(
                             "CG1401",

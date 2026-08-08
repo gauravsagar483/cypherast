@@ -23,9 +23,7 @@ def drop_distinct_beside_aggregate(tree: a.AstNode) -> a.AstNode:
         return False
 
     def _fix(node: a.AstNode) -> a.AstNode | None:
-        if isinstance(node, (a.With, a.Return)) and node.distinct and _has_agg(
-            node.expressions
-        ):
+        if isinstance(node, (a.With, a.Return)) and node.distinct and _has_agg(node.expressions):
             node.distinct = None
         return node
 

@@ -35,4 +35,3 @@ def split_multi_path_match(tree: a.AstNode) -> a.AstNode:
         return node
 
     return tree.transform(_fix, copy=False)
-

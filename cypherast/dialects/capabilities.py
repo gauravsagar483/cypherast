@@ -65,3 +65,30 @@ class DialectCapabilities:
 
     # Pattern predicates in WHERE
     pattern_predicate_introduces_bindings: bool = True  # openCypher may; some engines forbid
+
+    # openCypher 9 validation (enabled on ``OPENCYPHER9_CAPABILITIES`` / ``OpenCypher``)
+    check_function_signatures: bool = False
+    reject_excluded_clauses: bool = False
+    reject_undirected_patterns: bool = False
+    reject_var_length_binding: bool = False
+    reject_call_subquery: bool = False
+    reject_gql_nodes: bool = False
+    reject_quantified_path: bool = False
+    reject_using_hints: bool = False
+    check_comparability: bool = False
+
+
+OPENCYPHER9_CAPABILITIES = DialectCapabilities(
+    check_undefined_variables=True,
+    allow_exists_function=False,
+    pattern_predicate_introduces_bindings=True,
+    check_function_signatures=True,
+    reject_excluded_clauses=True,
+    reject_undirected_patterns=True,
+    reject_var_length_binding=True,
+    reject_call_subquery=True,
+    reject_gql_nodes=True,
+    reject_quantified_path=True,
+    reject_using_hints=True,
+    check_comparability=True,
+)

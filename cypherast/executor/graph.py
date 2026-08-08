@@ -43,9 +43,7 @@ class Graph:
         self._by_label: dict[str, set[int]] = {}
         self._id_gen = itertools.count(1)
 
-    def create_node(
-        self, labels: t.Iterable[str] | str | None = None, **props: t.Any
-    ) -> Node:
+    def create_node(self, labels: t.Iterable[str] | str | None = None, **props: t.Any) -> Node:
         nid = next(self._id_gen)
         if labels is None:
             lab: set[str] = set()

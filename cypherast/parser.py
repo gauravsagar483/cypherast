@@ -21,6 +21,9 @@ class Parser:
     # --- public -----------------------------------------------------------
 
     def parse(self) -> a.AstNode:
+        version = None
+        if self._match(TokenKind.CYPHER) and self._check(TokenKind.INTEGER):
+            version = int(self._advance().text)
         node = self.parse_statement()
         if not self._check(TokenKind.EOF):
             tok = self._peek()
@@ -29,7 +32,7 @@ class Parser:
                 code="CG1101",
                 expected={"EOF"},
             )
-        return a.Cypher(this=node)
+        return a.Cypher(this=node, version=version)
 
     def parse_statement(self) -> a.AstNode:
         left: a.AstNode = self.parse_query()
@@ -91,7 +94,35 @@ class Parser:
         where = None
         if self._match(TokenKind.WHERE):
             where = a.Where(this=self.parse_expression())
-        return a.Match(pattern=pattern, optional=optional or None, where=where)
+        hints = self._parse_match_hints()
+        return a.Match(pattern=pattern, optional=optional or None, where=where, hints=hints)
+
+    def _parse_match_hints(self) -> list[str] | None:
+        hints: list[str] = []
+        while self._match(TokenKind.USING):
+            parts = ["USING"]
+            if self._match(TokenKind.INDEX):
+                parts.append("INDEX")
+            elif self._match(TokenKind.SCAN):
+                parts.append("SCAN")
+            elif self._match(TokenKind.JOIN):
+                parts.append("JOIN")
+            else:
+                raise self._err(
+                    "Expected INDEX, SCAN, or JOIN after USING",
+                    code="CG1102",
+                    expected={"INDEX", "SCAN", "JOIN"},
+                )
+            while self._check(TokenKind.IDENT) or self._check(TokenKind.COLON):
+                parts.append(self._advance().text)
+                if self._check(TokenKind.LPAREN):
+                    parts.append(self._advance().text)
+                    while not self._check(TokenKind.RPAREN) and not self._check(TokenKind.EOF):
+                        parts.append(self._advance().text)
+                    if self._check(TokenKind.RPAREN):
+                        parts.append(self._advance().text)
+            hints.append(" ".join(parts))
+        return hints or None
 
     def parse_unwind(self) -> a.Unwind:
         self._expect(TokenKind.UNWIND)
@@ -160,21 +191,12 @@ class Parser:
                 self._match(TokenKind.ASC)
             nulls = None
             # Contextual: ORDER BY … NULLS FIRST|LAST (idents, not reserved keywords)
-            if (
-                self._check(TokenKind.IDENT)
-                and self._peek().text.upper() == "NULLS"
-            ):
+            if self._check(TokenKind.IDENT) and self._peek().text.upper() == "NULLS":
                 self._advance()
-                if (
-                    self._check(TokenKind.IDENT)
-                    and self._peek().text.upper() == "FIRST"
-                ):
+                if self._check(TokenKind.IDENT) and self._peek().text.upper() == "FIRST":
                     self._advance()
                     nulls = "FIRST"
-                elif (
-                    self._check(TokenKind.IDENT)
-                    and self._peek().text.upper() == "LAST"
-                ):
+                elif self._check(TokenKind.IDENT) and self._peek().text.upper() == "LAST":
                     self._advance()
                     nulls = "LAST"
                 else:
@@ -216,14 +238,19 @@ class Parser:
         items: list[a.AstNode] = []
         while True:
             left = self.parse_set_target()
-            op = "="
-            if self._match(TokenKind.PLUS):
-                self._expect(TokenKind.EQ)
-                op = "+="
+            if isinstance(left, a.NodePattern) and left.labels is not None:
+                items.append(a.SetItem(this=left))
             else:
-                self._expect(TokenKind.EQ)
-            right = self.parse_expression()
-            items.append(a.SetItem(this=left, expression=right, op=op if op != "=" else None))
+                op = "="
+                if self._match(TokenKind.PLUS):
+                    self._expect(TokenKind.EQ)
+                    op = "+="
+                else:
+                    self._expect(TokenKind.EQ)
+                right = self.parse_expression()
+                items.append(
+                    a.SetItem(this=left, expression=right, op=op if op != "=" else None)
+                )
             if not self._match(TokenKind.COMMA):
                 break
         return a.Set(items=items)
@@ -231,9 +258,8 @@ class Parser:
     def parse_set_target(self) -> a.AstNode:
         """SET LHS: property / variable / labels — must not consume ``=`` as comparison."""
         node = self.parse_postfix()
-        if self._check(TokenKind.COLON) and isinstance(node, a.Identifier):
-            labels = self._parse_labels()
-            return a.NodePattern(variable=node, labels=labels)
+        if isinstance(node, a.LabelPredicate) and isinstance(node.this, a.Identifier):
+            return a.NodePattern(variable=node.this, labels=node.labels)
         return node
 
     def parse_delete(self) -> a.Delete:
@@ -246,11 +272,9 @@ class Parser:
         self._expect(TokenKind.REMOVE)
         items: list[a.AstNode] = []
         while True:
-            # REMOVE n.prop  OR  REMOVE n:Label:Label2
             target = self.parse_postfix()
-            if self._check(TokenKind.COLON) and isinstance(target, a.Identifier):
-                labels = self._parse_labels()
-                items.append(a.RemoveLabels(this=target, labels=labels))
+            if isinstance(target, a.LabelPredicate) and isinstance(target.this, a.Identifier):
+                items.append(a.RemoveLabels(this=target.this, labels=target.labels))
             else:
                 items.append(target)
             if not self._match(TokenKind.COMMA):
@@ -304,11 +328,11 @@ class Parser:
     def _parse_call_procedure_body(self) -> a.CallProcedure:
         """``ns.proc(args) [YIELD items|*] [WHERE expr]`` (CALL already consumed)."""
         name = self._parse_procedure_name()
-        self._expect(TokenKind.LPAREN)
         args: list[a.AstNode] = []
-        if not self._check(TokenKind.RPAREN):
-            args = self.parse_expression_list()
-        self._expect(TokenKind.RPAREN)
+        if self._match(TokenKind.LPAREN):
+            if not self._check(TokenKind.RPAREN):
+                args = self.parse_expression_list()
+            self._expect(TokenKind.RPAREN)
         yield_: a.Yield | None = None
         where: a.Where | None = None
         if self._match(TokenKind.YIELD):
@@ -365,17 +389,16 @@ class Parser:
             return a.PathPattern(variable=variable, elements=[node])
 
         # Neo4j QPP: ((n)-[:R]->(m)){1,3}  or  ((n)-[:R]->(m))+
-        if (
-            self._check(TokenKind.LPAREN)
-            and self._peek(1).kind is TokenKind.LPAREN
-        ):
+        if self._check(TokenKind.LPAREN) and self._peek(1).kind is TokenKind.LPAREN:
             saved = self._i
             self._advance()  # outer (
             try:
                 inner = self.parse_path_pattern()
                 self._expect(TokenKind.RPAREN)
-                if self._check(TokenKind.LBRACE) or self._check(TokenKind.STAR) or self._check(
-                    TokenKind.PLUS
+                if (
+                    self._check(TokenKind.LBRACE)
+                    or self._check(TokenKind.STAR)
+                    or self._check(TokenKind.PLUS)
                 ):
                     min_hops, max_hops = self._parse_path_quantifier()
                     q = a.QuantifiedPath(this=inner, min_hops=min_hops, max_hops=max_hops)
@@ -436,34 +459,56 @@ class Parser:
         labels: list[str] = []
         if not self._match(TokenKind.COLON):
             return a.LabelExpression(labels=[])
-        if not self._check(TokenKind.IDENT):
-            raise self._err("Expected label name", code="CG1104")
-        first = self._advance().text
+        first = self._parse_unquoted_name()
         if self._match(TokenKind.PIPE):
             parts = [first]
             while True:
-                if not self._check(TokenKind.IDENT):
-                    raise self._err("Expected label name after |", code="CG1104")
-                parts.append(self._advance().text)
+                parts.append(self._parse_unquoted_name())
                 if not self._match(TokenKind.PIPE):
                     break
             return a.LabelExpression(labels=[], expression="|".join(parts))
         labels.append(first)
         while self._match(TokenKind.COLON):
-            if not self._check(TokenKind.IDENT):
-                raise self._err("Expected label name", code="CG1104")
-            labels.append(self._advance().text)
+            labels.append(self._parse_unquoted_name())
         return a.LabelExpression(labels=labels)
+
+    def _parse_unquoted_name(self) -> str:
+        """Label, rel type, property, or map key — keywords allowed (e.g. ``End``, ``count``)."""
+        tok = self._peek()
+        if tok.kind in {
+            TokenKind.RBRACKET,
+            TokenKind.LBRACE,
+            TokenKind.STAR,
+            TokenKind.COMMA,
+            TokenKind.PIPE,
+            TokenKind.COLON,
+            TokenKind.RPAREN,
+            TokenKind.EOF,
+        }:
+            raise self._err("Expected name", code="CG1104")
+        self._advance()
+        return self._name_from_token(tok)
+
+    def _name_from_token(self, tok: Token) -> str:
+        if tok.kind is TokenKind.IDENT:
+            return tok.text
+        off = tok.position.offset
+        i = off
+        while i < len(self.source) and (self.source[i].isalnum() or self.source[i] == "_"):
+            i += 1
+        return self.source[off:i]
 
     def parse_relationship_pattern(self) -> a.RelationshipPattern:
         direction = a.Direction.BOTH
         if self._match(TokenKind.ARROW_LEFT):
             direction = a.Direction.INCOMING
-            # <-[...]-  or  <--
+            # <-[...]-  or  <--  or  <-->
             if self._check(TokenKind.LBRACKET):
                 rel = self._parse_rel_detail(direction)
                 self._expect(TokenKind.MINUS)
                 return rel
+            if self._match(TokenKind.ARROW_RIGHT):
+                return a.RelationshipPattern(direction=a.Direction.BOTH)
             self._expect(TokenKind.MINUS)
             return a.RelationshipPattern(direction=direction)
         # starts with -
@@ -493,19 +538,17 @@ class Parser:
         if self._check(TokenKind.IDENT):
             variable = self.parse_variable()
         if self._match(TokenKind.COLON):
-            types = [self._expect(TokenKind.IDENT).text]
+            types = [self._parse_type_name()]
             while self._match(TokenKind.PIPE):
                 # optional colon before next type
                 self._match(TokenKind.COLON)
-                types.append(self._expect(TokenKind.IDENT).text)
+                types.append(self._parse_type_name())
         if self._match(TokenKind.STAR):
             variable_length = True
             if self._check(TokenKind.INTEGER):
                 min_hops = int(self._advance().text)
                 if self._match(TokenKind.DOTDOT):
-                    max_hops = (
-                        int(self._advance().text) if self._check(TokenKind.INTEGER) else None
-                    )
+                    max_hops = int(self._advance().text) if self._check(TokenKind.INTEGER) else None
                 else:
                     max_hops = min_hops
             elif self._match(TokenKind.DOTDOT):
@@ -527,6 +570,34 @@ class Parser:
             max_hops=max_hops,
             variable_length=variable_length or None,
         )
+
+    def _parse_type_name(self) -> str:
+        """Relationship or label name — may be a keyword (e.g. ``CONTAINS``, ``End``)."""
+        tok = self._peek()
+        if tok.kind in {
+            TokenKind.RBRACKET,
+            TokenKind.LBRACE,
+            TokenKind.STAR,
+            TokenKind.COMMA,
+            TokenKind.PIPE,
+            TokenKind.COLON,
+            TokenKind.RPAREN,
+            TokenKind.EOF,
+        }:
+            raise self._err("Expected type name", code="CG1104")
+        self._advance()
+        return self._name_from_token(tok)
+
+    def _parse_quantifier(self, name: str) -> a.Quantifier:
+        self._expect(TokenKind.LPAREN)
+        var = self.parse_variable()
+        self._expect(TokenKind.IN)
+        source = self.parse_expression()
+        where_expr: a.AstNode | None = None
+        if self._match(TokenKind.WHERE):
+            where_expr = self.parse_expression()
+        self._expect(TokenKind.RPAREN)
+        return a.Quantifier(name=name.lower(), variable=var, source=source, where=where_expr)
 
     # --- expressions (Pratt-ish precedence climbing) ----------------------
 
@@ -563,9 +634,7 @@ class Parser:
             if self._check(TokenKind.LPAREN) and self._looks_like_pattern_start():
                 # Optional extra wrapping paren: NOT ((path))
                 extra = False
-                if self._peek(1).kind is TokenKind.LPAREN and self._inner_looks_like_pattern(
-                    1
-                ):
+                if self._peek(1).kind is TokenKind.LPAREN and self._inner_looks_like_pattern(1):
                     self._advance()  # consume outer (
                     extra = True
                 pred = a.PatternPredicate(pattern=self.parse_path_pattern(), not_=True)
@@ -680,7 +749,7 @@ class Parser:
         node = self.parse_primary()
         while True:
             if self._match(TokenKind.DOT):
-                name = self._expect(TokenKind.IDENT).text
+                name = self._parse_unquoted_name()
                 node = a.Property(this=node, name=name)
                 if self._check(TokenKind.LBRACE):
                     entries = self._parse_map_projection_entries()
@@ -689,10 +758,22 @@ class Parser:
                 entries = self._parse_map_projection_entries()
                 node = a.MapProjection(this=node, entries=entries)
             elif self._match(TokenKind.LBRACKET):
-                # list/string subscript: expr[index]
-                index = self.parse_expression()
-                self._expect(TokenKind.RBRACKET)
-                node = a.ListSubscript(this=node, index=index)
+                if self._match(TokenKind.DOTDOT):
+                    end = None if self._check(TokenKind.RBRACKET) else self.parse_expression()
+                    self._expect(TokenKind.RBRACKET)
+                    node = a.ListSlice(this=node, start=None, end=end)
+                else:
+                    first = self.parse_expression()
+                    if self._match(TokenKind.DOTDOT):
+                        end = None if self._check(TokenKind.RBRACKET) else self.parse_expression()
+                        self._expect(TokenKind.RBRACKET)
+                        node = a.ListSlice(this=node, start=first, end=end)
+                    else:
+                        self._expect(TokenKind.RBRACKET)
+                        node = a.ListSubscript(this=node, index=first)
+            elif self._check(TokenKind.COLON) and isinstance(node, a.Identifier):
+                labels = self._parse_labels()
+                node = a.LabelPredicate(this=node, labels=labels)
             else:
                 break
         return node
@@ -728,6 +809,8 @@ class Parser:
             return self.parse_map_literal()
         if tok.kind is TokenKind.EXISTS:
             return self.parse_exists()
+        if tok.kind in (TokenKind.ALL, TokenKind.ANY, TokenKind.NONE, TokenKind.SINGLE):
+            return self._parse_quantifier(self._advance().text)
         if tok.kind is TokenKind.LPAREN:
             # Could be parenthesized expr OR a pattern (node) in expression context
             return self._parse_paren_or_pattern()
@@ -759,9 +842,7 @@ class Parser:
                 self._expect(TokenKind.RPAREN)
                 if name.lower() == "coalesce":
                     return a.Coalesce(expressions=args)
-                return a.FunctionCall(
-                    name=name, expressions=args, distinct=distinct or None
-                )
+                return a.FunctionCall(name=name, expressions=args, distinct=distinct or None)
             return a.Identifier(this=name)
         raise self._err(f"Unexpected token {tok.text!r}", code="CG1101")
 
@@ -793,9 +874,7 @@ class Parser:
             saved = self._i
             try:
                 extra = False
-                if self._peek(1).kind is TokenKind.LPAREN and self._inner_looks_like_pattern(
-                    1
-                ):
+                if self._peek(1).kind is TokenKind.LPAREN and self._inner_looks_like_pattern(1):
                     self._advance()  # outer (
                     extra = True
                 path = self.parse_path_pattern()
@@ -826,9 +905,12 @@ class Parser:
 
         self._expect(TokenKind.LPAREN)
         # Heuristic: if we see a node pattern shape, try pattern / (n) unwrap
-        if self._check(TokenKind.IDENT) or self._check(TokenKind.COLON) or self._check(
-            TokenKind.RPAREN
-        ) or self._check(TokenKind.LBRACE):
+        if (
+            self._check(TokenKind.IDENT)
+            or self._check(TokenKind.COLON)
+            or self._check(TokenKind.RPAREN)
+            or self._check(TokenKind.LBRACE)
+        ):
             saved = self._i
             try:
                 self._i = saved - 1
@@ -866,20 +948,40 @@ class Parser:
         if self._check(TokenKind.RBRACKET):
             self._advance()
             return a.List(expressions=[])
-        # Pattern comprehension: [(n)-->(m) | m.x]
+        # Pattern comprehension: [p = (n)-->(m) | m.x] or [(n)-->(m) | m.x]
+        if self._check(TokenKind.IDENT):
+            saved = self._i
+            var = self.parse_variable()
+            if self._match(TokenKind.EQ):
+                try:
+                    path = self.parse_path_pattern()
+                    where: a.Where | None = (
+                        a.Where(this=self.parse_expression())
+                        if self._match(TokenKind.WHERE)
+                        else None
+                    )
+                    if self._match(TokenKind.PIPE):
+                        proj = self.parse_expression()
+                        self._expect(TokenKind.RBRACKET)
+                        return a.PatternComprehension(
+                            variable=var, pattern=path, where=where, projection=proj
+                        )
+                except ParseError:
+                    pass
+                self._i = saved
+            else:
+                self._i = saved
         if self._check(TokenKind.LPAREN):
             saved = self._i
             try:
                 path = self.parse_path_pattern()
-                where: a.Where | None = (
+                where = (
                     a.Where(this=self.parse_expression()) if self._match(TokenKind.WHERE) else None
                 )
                 if self._match(TokenKind.PIPE):
                     proj = self.parse_expression()
                     self._expect(TokenKind.RBRACKET)
-                    return a.PatternComprehension(
-                        pattern=path, where=where, projection=proj
-                    )
+                    return a.PatternComprehension(pattern=path, where=where, projection=proj)
                 self._i = saved
             except ParseError:
                 self._i = saved
@@ -910,7 +1012,7 @@ class Parser:
         entries: list[tuple[str, a.AstNode]] = []
         if not self._check(TokenKind.RBRACE):
             while True:
-                key = self._expect(TokenKind.IDENT).text
+                key = self._parse_unquoted_name()
                 self._expect(TokenKind.COLON)
                 val = self.parse_expression()
                 entries.append((key, val))
@@ -928,13 +1030,9 @@ class Parser:
                     if self._match(TokenKind.STAR):
                         entries.append(a.Star())
                     elif self._check(TokenKind.IDENT):
-                        entries.append(
-                            a.PropertySelector(name=self._advance().text)
-                        )
+                        entries.append(a.PropertySelector(name=self._advance().text))
                     else:
-                        raise self._err(
-                            "Invalid map projection entry", code="CG1102"
-                        )
+                        raise self._err("Invalid map projection entry", code="CG1102")
                 elif self._check(TokenKind.IDENT):
                     name = self._advance().text
                     if self._match(TokenKind.COLON):
@@ -966,8 +1064,26 @@ class Parser:
         return a.Case(this=this, ifs=ifs, default=default)
 
     def parse_variable(self) -> a.Identifier:
-        tok = self._expect(TokenKind.IDENT)
-        return a.Identifier(this=tok.text)
+        tok = self._peek()
+        if tok.kind is TokenKind.IDENT:
+            self._advance()
+            return a.Identifier(this=tok.text)
+        if tok.kind not in {
+            TokenKind.EOF,
+            TokenKind.LPAREN,
+            TokenKind.RPAREN,
+            TokenKind.LBRACKET,
+            TokenKind.RBRACE,
+            TokenKind.LBRACE,
+            TokenKind.COMMA,
+            TokenKind.SEMICOLON,
+            TokenKind.PIPE,
+            TokenKind.COLON,
+            TokenKind.DOT,
+        }:
+            self._advance()
+            return a.Identifier(this=self._name_from_token(tok))
+        raise self._err(f"mismatched input {tok.text!r}", code="CG1102")
 
     # --- token helpers ----------------------------------------------------
 

@@ -36,9 +36,9 @@ def _pattern_predicate_bindings(tree: a.AstNode) -> list[ConstraintIssue]:
                 for pred in where.find_all(a.PatternPredicate) if where else []:
                     assert isinstance(pred, a.PatternPredicate)
                     for n in pred.walk():
-                        if isinstance(
-                            n, (a.NodePattern, a.RelationshipPattern)
-                        ) and isinstance(n.variable, a.Identifier):
+                        if isinstance(n, (a.NodePattern, a.RelationshipPattern)) and isinstance(
+                            n.variable, a.Identifier
+                        ):
                             name = n.variable.this
                             if name not in where_scope:
                                 return [

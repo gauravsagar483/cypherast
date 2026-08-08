@@ -66,9 +66,9 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                     out.add(comp.variable.this)
                 if comp.pattern is not None:
                     for n in comp.pattern.walk():
-                        if isinstance(
-                            n, (a.NodePattern, a.RelationshipPattern)
-                        ) and isinstance(n.variable, a.Identifier):
+                        if isinstance(n, (a.NodePattern, a.RelationshipPattern)) and isinstance(
+                            n.variable, a.Identifier
+                        ):
                             out.add(n.variable.this)
         return out
 
@@ -126,9 +126,7 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                 binders = _local_binders(where)
                 for name in _refs(where, ignore=binders):
                     if name not in scope:
-                        return _issue(
-                            name, "Project it in WITH or reintroduce via MATCH"
-                        )
+                        return _issue(name, "Project it in WITH or reintroduce via MATCH")
             elif isinstance(clause, a.With):
                 # Subquery leading WITH may import from enclosing outer scope.
                 with_scope = scope | (enclosing or set())
@@ -139,12 +137,8 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                     binders = _local_binders(core)
                     for name in _refs(core, ignore=binders):
                         if name not in with_scope:
-                            return _issue(
-                                name, "Project it in a prior WITH or MATCH"
-                            )
-                has_star = any(
-                    isinstance(expr, a.Star) for expr in (clause.expressions or [])
-                )
+                            return _issue(name, "Project it in a prior WITH or MATCH")
+                has_star = any(isinstance(expr, a.Star) for expr in (clause.expressions or []))
                 nxt: set[str] = set(scope) if has_star else set()
                 for expr in clause.expressions or []:
                     an = _alias_name(expr)
@@ -221,9 +215,7 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                         assert isinstance(qn, a.Query)
                         branches.append(qn)
                 for branch in branches:
-                    issues = _check_query(
-                        branch, initial=set(init), enclosing=set(scope)
-                    )
+                    issues = _check_query(branch, initial=set(init), enclosing=set(scope))
                     if issues:
                         return issues
                 scope = scope | _return_aliases(inner)
@@ -249,9 +241,7 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
                     binders = _local_binders(core)
                     for name in _refs(core, ignore=binders):
                         if name not in scope:
-                            return _issue(
-                                name, "Carry it through WITH or MATCH again"
-                            )
+                            return _issue(name, "Carry it through WITH or MATCH again")
                     an = _alias_name(expr)
                     if an:
                         ret_aliases.add(an)
