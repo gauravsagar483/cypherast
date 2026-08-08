@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cypherast import parse_one, validate
-from cypherast.errors import CypherastError
+from cypherast import parse_one, translate, validate
+from cypherast.errors import CompatibilityError, CypherastError, ValidationError
 from cypherast.executor.engine import execute
 from cypherast.executor.graph import Graph
 from tests.tck.compare import rows_equal
@@ -17,6 +17,64 @@ from tests.tck.fetch import ensure_official_tck, official_graphs_path, official_
 from tests.tck.values import result_rows
 
 _DEFAULT_TCK_DIALECT = "opencypher"
+_BASELINE_DIALECT = "opencypher"
+
+# Targets for Approach B transpose matrix (not opencypher / opencypher9).
+DIALECT_MATRIX_TARGETS: tuple[str, ...] = ("neo4j5", "neo4j25", "memgraph", "puppygraph")
+
+# Conservative run-rate floors on the executable subset (kind=run). Skips (e.g. PuppyGraph
+# capability residuals) are excluded from the denominator. Measured 2026-08-08:
+# neo4j5/neo4j25/memgraph ~97%, puppygraph ~59%. Floors sit below measured rates.
+# Shared by the CLI gate (`python -m tests.tck --dialect-matrix`) and the pytest gate.
+DIALECT_MATRIX_FLOORS: dict[str, float] = {
+    "neo4j5": 0.90,
+    "neo4j25": 0.90,
+    "memgraph": 0.90,
+    "puppygraph": 0.55,
+}
+
+# A run rate over a shrinking subset says nothing, so the gate also requires a minimum
+# executable count and caps the share of transposes that may be skipped.
+# Measured 2026-08-08: 569 executable / 0 skipped for neo4j5/neo4j25/memgraph,
+# 483 executable / 86 skipped (15.1%) for puppygraph.
+DIALECT_MATRIX_MIN_EXECUTABLE: dict[str, int] = {
+    "neo4j5": 500,
+    "neo4j25": 500,
+    "memgraph": 500,
+    "puppygraph": 400,
+}
+
+DIALECT_MATRIX_MAX_SKIP_RATIO: dict[str, float] = {
+    "neo4j5": 0.05,
+    "neo4j25": 0.05,
+    "memgraph": 0.05,
+    "puppygraph": 0.25,
+}
+
+# Transposes rejected with one of these codes are capability residuals — the target
+# dialect declares it cannot express the construct — so they land in the skip bucket for
+# every target, not just the one that happens to have the most limits. Deliberately
+# excluded: CG1201 (unknown variable) and CG1501 (rewrite failed) describe a broken
+# transpose rather than an engine limit, so they stay visible as failures.
+DIALECT_MATRIX_SKIP_CODES: frozenset[str] = frozenset(
+    {
+        "CG1401",  # construct not supported by target dialect
+        "CG1402",  # unlabelled node pattern not allowed
+        "CG1502",  # clause outside the dialect's accepted surface
+        "CG1503",  # undirected pattern rejected
+        "CG1504",  # variable bound to a variable-length relationship
+        "CG1505",  # CALL subquery rejected
+        "CG1506",  # USING hints rejected
+        "CG1507",  # unknown function for this dialect
+        "CG1508",  # function excluded from this dialect
+        "CG1509",  # function arity outside the dialect's signature
+        "CG1510",  # quantified path rejected
+        "CG1511",  # pattern shape rejected
+        "CG1512",  # comparability rules of this dialect
+        "CG1520",  # needs a newer Cypher version than the dialect declares
+        "CG1521",  # engine-specific relationship quantifier
+    }
+)
 
 _SCENARIO = re.compile(r"^\s*Scenario(?: Outline)?:\s*(.+)$", re.M)
 _OUTLINE_PLACEHOLDER = re.compile(r"<\w+>")
@@ -41,6 +99,7 @@ def _parse_tck(query: str, *, dialect: str | None = None):
 
 def _validate_tck(query: str, *, dialect: str | None = None) -> None:
     validate(query, dialect=dialect or tck_dialect())
+
 
 # OC9 skip patterns for official TCK (excluded / unsupported constructs)
 OC9_TCK_SKIP_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -116,10 +175,124 @@ class Scoreboard:
             parts.append(f"run={self.run_rate:.1%} ({len(run)})")
             expected = self.by_kind("expected")
             if expected:
-                parts.append(f"effective={self.effective_run_rate:.1%} ({len(run) + len(expected)})")
+                parts.append(
+                    f"effective={self.effective_run_rate:.1%} ({len(run) + len(expected)})"
+                )
         if self.skipped:
             parts.append(f"skipped={self.skipped}")
         return " | ".join(parts)
+
+
+@dataclass
+class DialectMatrixResult:
+    """One scenario × target dialect transpose attempt."""
+
+    name: str
+    feature: str
+    dialect: str
+    passed: bool
+    error: str | None = None
+    kind: str = "run"  # run | skip
+    skip_reason: str | None = None
+
+
+@dataclass
+class DialectMatrixBoard:
+    """Per-dialect transpose results over OC9-passing run scenarios."""
+
+    baseline: Scoreboard
+    results: list[DialectMatrixResult] = field(default_factory=list)
+    targets: tuple[str, ...] = DIALECT_MATRIX_TARGETS
+
+    def for_dialect(self, dialect: str) -> list[DialectMatrixResult]:
+        return [r for r in self.results if r.dialect == dialect]
+
+    def executable(self, dialect: str) -> list[DialectMatrixResult]:
+        return [r for r in self.for_dialect(dialect) if r.kind == "run"]
+
+    def run_rate(self, dialect: str) -> float:
+        rows = self.executable(dialect)
+        if not rows:
+            return 0.0
+        return sum(1 for r in rows if r.passed) / len(rows)
+
+    def skipped(self, dialect: str) -> int:
+        return sum(1 for r in self.for_dialect(dialect) if r.kind == "skip")
+
+    def skip_ratio(self, dialect: str) -> float:
+        """Skipped share of all transpose attempts for ``dialect``."""
+        attempted = len(self.for_dialect(dialect))
+        if not attempted:
+            return 0.0
+        return self.skipped(dialect) / attempted
+
+    def summary(self) -> str:
+        parts = [f"TCK dialect matrix: baseline {self.baseline.summary()}"]
+        for d in self.targets:
+            exe = self.executable(d)
+            parts.append(f"{d}={self.run_rate(d):.1%} ({len(exe)} exe, skip={self.skipped(d)})")
+        return " | ".join(parts)
+
+
+def dialect_matrix_gate_failures(
+    board: DialectMatrixBoard,
+    *,
+    floors: dict[str, float] | None = None,
+    min_executable: dict[str, int] | None = None,
+    max_skip_ratio: dict[str, float] | None = None,
+) -> list[str]:
+    """Gate messages for the transpose matrix; empty list means the gate passes.
+
+    Individual transpose failures are expected, so the gate compares each target's
+    run rate over ``board.executable(dialect)`` against its floor. Because a rate
+    over a shrinking subset can hide regressions, the gate also requires a minimum
+    executable count and caps the skipped share of attempts — mass capability skips
+    fail even at a 100% run rate. A board target missing any threshold is a gate
+    failure; never silently skip a check.
+    """
+    rate_limits = DIALECT_MATRIX_FLOORS if floors is None else floors
+    size_limits = DIALECT_MATRIX_MIN_EXECUTABLE if min_executable is None else min_executable
+    skip_limits = DIALECT_MATRIX_MAX_SKIP_RATIO if max_skip_ratio is None else max_skip_ratio
+    messages: list[str] = []
+    for dialect in board.targets:
+        missing = [
+            label
+            for label, limits in (
+                ("floor", rate_limits),
+                ("min executable", size_limits),
+                ("max skip ratio", skip_limits),
+            )
+            if dialect not in limits
+        ]
+        if missing:
+            messages.append(f"{dialect}: no {' / '.join(missing)} threshold configured")
+            continue
+        executable = board.executable(dialect)
+        if not executable:
+            messages.append(f"{dialect}: no executable scenarios")
+            continue
+        minimum = size_limits[dialect]
+        if len(executable) < minimum:
+            messages.append(
+                f"{dialect}: {len(executable)} executable scenarios < minimum {minimum} "
+                f"(skipped={board.skipped(dialect)})"
+            )
+            continue
+        skip_cap = skip_limits[dialect]
+        skip_ratio = board.skip_ratio(dialect)
+        if skip_ratio > skip_cap:
+            messages.append(
+                f"{dialect}: skip ratio {skip_ratio:.1%} > max {skip_cap:.0%} "
+                f"({board.skipped(dialect)} skipped of {len(board.for_dialect(dialect))})"
+            )
+            continue
+        floor = rate_limits[dialect]
+        rate = board.run_rate(dialect)
+        if rate < floor:
+            messages.append(
+                f"{dialect}: run rate {rate:.1%} < floor {floor:.0%} ({len(executable)} exe)"
+            )
+    return messages
 
 
 def discover_features(root: Path | None = None) -> list[Path]:
@@ -243,9 +416,7 @@ def run_tck(
                     continue
                 board.results.append(_run_parse(name, rel, full_body, dialect=read))
                 continue
-            unsupported = _run_skip_reason(
-                name, full_body, _extract_query(full_body), dialect=read
-            )
+            unsupported = _run_skip_reason(name, full_body, _extract_query(full_body), dialect=read)
             if unsupported:
                 board.results.append(
                     ScenarioResult(name, rel, True, kind="skip", skip_reason=unsupported)
@@ -260,8 +431,10 @@ def run_tck(
                 )
                 continue
             query = _extract_query(full_body)
-            if query and _try_parse(query, dialect=read) is not None and _is_intentional_negative(
-                name
+            if (
+                query
+                and _try_parse(query, dialect=read) is not None
+                and _is_intentional_negative(name)
             ):
                 board.results.append(
                     ScenarioResult(
@@ -341,9 +514,7 @@ def _extract_init_queries(body: str) -> list[str]:
     return queries
 
 
-def _graph_setup(
-    body: str, *, tck_root: Path | None, dialect: str | None = None
-) -> Graph | str:
+def _graph_setup(body: str, *, tck_root: Path | None, dialect: str | None = None) -> Graph | str:
     if re.search(r"Given an empty graph", body, re.I) or re.search(r"Given any graph", body, re.I):
         graph = Graph()
     else:
@@ -361,9 +532,7 @@ def _graph_setup(
     return graph
 
 
-def _apply_init_queries(
-    graph: Graph, body: str, *, dialect: str | None = None
-) -> str | None:
+def _apply_init_queries(graph: Graph, body: str, *, dialect: str | None = None) -> str | None:
     for query in _extract_init_queries(body):
         for stmt in _split_statements(query):
             try:
@@ -438,9 +607,7 @@ def _parse_table_row(line: str) -> list[str]:
     return [cell.strip() for cell in m.group(1).split("|")]
 
 
-def _run_parse(
-    name: str, feature: str, body: str, *, dialect: str | None = None
-) -> ScenarioResult:
+def _run_parse(name: str, feature: str, body: str, *, dialect: str | None = None) -> ScenarioResult:
     query = _extract_query(body)
     if not query:
         return ScenarioResult(name, feature, False, "no query found", kind="parse")
@@ -652,4 +819,240 @@ def run_official(
     )
     out = report_path or Path(__file__).parent / "results.md"
     write_report(board, out, tck_path=features)
+    return board
+
+
+def _compare_expected_rows(
+    expected: tuple[list[str], list[tuple[str, ...]], bool, bool],
+    actual_rows: list[tuple[str, ...]],
+) -> str | None:
+    """Return an error string if actual rows do not match a parsed TCK expectation."""
+    columns, expected_rows, any_order, list_order_insensitive = expected
+    if not columns:
+        if actual_rows:
+            return f"expected empty, got {len(actual_rows)} rows"
+        return None
+    if len(actual_rows) != len(expected_rows):
+        return f"row count {len(actual_rows)} != {len(expected_rows)}"
+    if not rows_equal(
+        list(expected_rows),
+        list(actual_rows),
+        any_order=any_order,
+        list_order_insensitive=list_order_insensitive,
+    ):
+        return f"rows differ: expected {expected_rows[:3]} got {actual_rows[:3]}"
+    return None
+
+
+def _run_dialect_transpose(
+    name: str,
+    feature: str,
+    body: str,
+    query: str,
+    *,
+    dialect: str,
+    tck_root: Path | None,
+) -> DialectMatrixResult:
+    """Translate OC9 query to ``dialect``, execute on fresh graph, compare rows."""
+    try:
+        cypher_d = translate(
+            query,
+            from_=_BASELINE_DIALECT,
+            to_=dialect,
+            optimize=True,
+        )
+    except (ValidationError, CompatibilityError) as e:
+        if e.code in DIALECT_MATRIX_SKIP_CODES:
+            return DialectMatrixResult(
+                name,
+                feature,
+                dialect,
+                True,
+                kind="skip",
+                skip_reason=f"capability {e.code}: {str(e)[:160]}",
+            )
+        return DialectMatrixResult(name, feature, dialect, False, str(e), kind="run")
+    except Exception as e:  # noqa: BLE001
+        return DialectMatrixResult(name, feature, dialect, False, str(e), kind="run")
+
+    graph_or_err = _graph_setup(body, tck_root=tck_root, dialect=_BASELINE_DIALECT)
+    if isinstance(graph_or_err, str):
+        return DialectMatrixResult(name, feature, dialect, False, graph_or_err, kind="run")
+
+    expected = _parse_result_table(body)
+    if isinstance(expected, str):
+        return DialectMatrixResult(name, feature, dialect, False, expected, kind="run")
+    columns = expected[0]
+
+    try:
+        tree = parse_one(cypher_d, read=dialect)
+        result = execute(tree, graph=graph_or_err, dialect=dialect)
+        actual_rows = result_rows(result, columns) if columns else []
+        err = _compare_expected_rows(expected, actual_rows)
+        if err:
+            return DialectMatrixResult(name, feature, dialect, False, err, kind="run")
+        return DialectMatrixResult(name, feature, dialect, True, kind="run")
+    except Exception as e:  # noqa: BLE001
+        return DialectMatrixResult(name, feature, dialect, False, str(e), kind="run")
+
+
+def run_dialect_matrix(
+    root: Path | None = None,
+    *,
+    oc9_filter: bool = False,
+    tck_root: Path | None = None,
+    targets: tuple[str, ...] | None = None,
+) -> DialectMatrixBoard:
+    """OC9 baseline once; transpose each passing ``kind=run`` scenario to targets."""
+    read = _BASELINE_DIALECT
+    dests = targets or DIALECT_MATRIX_TARGETS
+    baseline = Scoreboard(dialect=read)
+    board = DialectMatrixBoard(baseline=baseline, targets=dests)
+
+    for feature in discover_features(root):
+        text = feature.read_text(encoding="utf-8")
+        rel = feature.name
+        try:
+            rel = str(feature.relative_to(root)) if root else feature.name
+        except ValueError:
+            rel = feature.name
+        background = _extract_background(text)
+        for name, body in _split_scenarios(text):
+            full_body = f"{background}{body}" if background else body
+            skip = _should_skip_scenario(name, full_body, oc9_filter=oc9_filter)
+            if skip:
+                baseline.results.append(
+                    ScenarioResult(name, rel, True, kind="skip", skip_reason=skip)
+                )
+                continue
+            query = _extract_query(full_body)
+            unsupported = _run_skip_reason(name, full_body, query, dialect=read)
+            if unsupported:
+                baseline.results.append(
+                    ScenarioResult(name, rel, True, kind="skip", skip_reason=unsupported)
+                )
+                continue
+            err_exp = _extract_error_expectation(full_body)
+            if err_exp:
+                baseline.results.append(
+                    _run_error_scenario(
+                        name,
+                        rel,
+                        full_body,
+                        tck_root=tck_root,
+                        err_exp=err_exp,
+                        dialect=read,
+                    )
+                )
+                continue
+            if (
+                query
+                and _try_parse(query, dialect=read) is not None
+                and _is_intentional_negative(name)
+            ):
+                baseline.results.append(
+                    ScenarioResult(
+                        name,
+                        rel,
+                        True,
+                        kind="expected",
+                        skip_reason="intentional negative (parse rejected)",
+                    )
+                )
+                continue
+
+            oc9 = _run_scenario(name, rel, full_body, tck_root=tck_root, dialect=read)
+            baseline.results.append(oc9)
+            if not oc9.passed or oc9.kind != "run" or not query:
+                continue
+            for dialect in dests:
+                board.results.append(
+                    _run_dialect_transpose(
+                        name,
+                        rel,
+                        full_body,
+                        query,
+                        dialect=dialect,
+                        tck_root=tck_root,
+                    )
+                )
+    return board
+
+
+def write_dialect_report(board: DialectMatrixBoard, path: Path, *, tck_path: Path) -> None:
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    baseline_run = board.baseline.by_kind("run")
+    baseline_pass = sum(1 for r in baseline_run if r.passed)
+
+    lines = [
+        "# openCypher TCK dialect transpose results",
+        "",
+        f"Generated: {now}",
+        f"Features: `{tck_path}`",
+        f"Baseline: `{board.baseline.dialect}` "
+        f"({baseline_pass}/{len(baseline_run)} passing run scenarios)",
+        f"Targets: {', '.join(f'`{d}`' for d in board.targets)}",
+        "",
+        "## Summary",
+        "",
+        "| Dialect | Executable | Passed | Failed | Skipped | Skip ratio | Run rate |",
+        "|---------|------------|--------|--------|---------|------------|----------|",
+    ]
+    for d in board.targets:
+        exe = board.executable(d)
+        passed = sum(1 for r in exe if r.passed)
+        failed = sum(1 for r in exe if not r.passed)
+        skipped = board.skipped(d)
+        lines.append(
+            f"| `{d}` | {len(exe)} | {passed} | {failed} | {skipped} | "
+            f"{board.skip_ratio(d):.1%} | {board.run_rate(d):.1%} |"
+        )
+
+    for d in board.targets:
+        lines.extend(["", f"## `{d}`", ""])
+        exe = board.executable(d)
+        skipped_rows = [r for r in board.for_dialect(d) if r.kind == "skip"]
+        failures = [r for r in exe if not r.passed]
+        lines.append(f"Run rate: **{board.run_rate(d):.1%}** ({len(exe)} executable)")
+        lines.append("")
+
+        if skipped_rows:
+            skip_reasons: dict[str, int] = {}
+            for r in skipped_rows:
+                key = r.skip_reason or "unknown"
+                skip_reasons[key] = skip_reasons.get(key, 0) + 1
+            lines.extend(["### Skip reasons", ""])
+            for reason, count in sorted(skip_reasons.items(), key=lambda x: -x[1])[:30]:
+                lines.append(f"- {reason}: {count}")
+            lines.append("")
+
+        if failures:
+            lines.extend(["### Failures (first 40)", ""])
+            for r in failures[:40]:
+                err = (r.error or "").replace("\n", " ")[:200]
+                lines.append(f"- **{r.feature}** / {r.name}: {err}")
+        else:
+            lines.append("No failures.")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run_official_dialect_matrix(
+    *,
+    oc9_filter: bool = False,
+    report_path: Path | None = None,
+    tck_root: Path | None = None,
+    targets: tuple[str, ...] | None = None,
+) -> DialectMatrixBoard:
+    root = tck_root or official_tck_root()
+    features = ensure_official_tck(root)
+    board = run_dialect_matrix(
+        features,
+        oc9_filter=oc9_filter,
+        tck_root=root,
+        targets=targets,
+    )
+    out = report_path or Path(__file__).parent / "results-dialects.md"
+    write_dialect_report(board, out, tck_path=features)
     return board

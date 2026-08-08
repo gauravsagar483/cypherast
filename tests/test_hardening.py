@@ -1,7 +1,10 @@
 """Hardening: parser edge cases, rename, optimize, translate."""
 
+import pytest
+
 import cypherast
 from cypherast import ast as a
+from cypherast.parser import MAX_PARSE_DEPTH, Parser
 
 
 def test_cypher_not_sql_method():
@@ -84,6 +87,66 @@ def test_complex_comprehension():
     )
     assert tree.find(a.ListComprehension)
     assert tree.find(a.PatternComprehension)
+
+
+@pytest.mark.parametrize(
+    "word",
+    [
+        "load",
+        "csv",
+        "headers",
+        "fieldterminator",
+        "from",
+        "group",
+        "of",
+        "transactions",
+        "rows",
+        "search",
+        "vector",
+        "score",
+        "show",
+        "constraint",
+        "assert",
+        "unique",
+    ],
+)
+@pytest.mark.parametrize("dialect", ["opencypher", "neo4j25", "memgraph"])
+def test_clause_words_stay_usable_as_bindings(word, dialect):
+    """Cypher 25 / Memgraph clause words are contextual, not reserved keywords."""
+    q = f"WITH [1, 2] AS {word} UNWIND {word} AS item RETURN {word}, item"
+    tree = cypherast.parse_one(q, read=dialect)
+    assert tree.cypher(dialect=dialect) == q
+
+
+def test_deeply_nested_expression_raises_parse_error():
+    depth = MAX_PARSE_DEPTH * 2
+    q = "RETURN " + "(" * depth + "1" + ")" * depth
+    with pytest.raises(cypherast.ParseError) as exc:
+        cypherast.parse_one(q)
+    assert exc.value.code == "CG1105"
+    assert "maximum recursion depth exceeded" in str(exc.value)
+
+
+def test_deeply_nested_subquery_raises_parse_error():
+    depth = MAX_PARSE_DEPTH * 2
+    q = "CALL { " * depth + "RETURN 1 AS x" + " }" * depth
+    with pytest.raises(cypherast.ParseError) as exc:
+        cypherast.parse_one(q)
+    assert exc.value.code == "CG1105"
+
+
+def test_parse_depth_guard_fires_before_python_recursion():
+    parser = Parser("RETURN " + "(" * 6 + "1" + ")" * 6, max_depth=4)
+    with pytest.raises(cypherast.ParseError) as exc:
+        parser.parse()
+    assert exc.value.code == "CG1105"
+    assert "4" in str(exc.value)
+
+
+def test_modest_nesting_still_parses():
+    depth = 20
+    q = "RETURN " + "(" * depth + "1 + 2" + ")" * depth + " AS x"
+    assert cypherast.parse_one(q).cypher()
 
 
 def test_run_string_funcs():

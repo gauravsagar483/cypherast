@@ -31,6 +31,7 @@ ERROR_CODES: dict[str, str] = {
     "CG1102": "Mismatched input",
     "CG1103": "Unexpected end of input",
     "CG1104": "Invalid pattern",
+    "CG1105": "Maximum parse depth exceeded",
     # Validation CG12xx
     "CG1201": "Unknown variable",
     "CG1202": "Scope violation",
@@ -47,6 +48,8 @@ ERROR_CODES: dict[str, str] = {
     "CG1402": "Unlabelled node pattern not allowed by target dialect",
     # Optimize CG15xx
     "CG1501": "Rewrite failed",
+    "CG1520": "Construct requires a newer Cypher version than the dialect declares",
+    "CG1521": "Engine-specific relationship quantifier not in this dialect",
     # Plan CG16xx
     "CG1601": "No viable plan",
     "CG1602": "Plan enumeration exceeded max plans",

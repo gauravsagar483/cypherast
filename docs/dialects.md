@@ -2,15 +2,28 @@
 
 cypherast speaks multiple Cypher dialects through one AST. Dialects plug in at parse, render, and **capability** boundaries.
 
+## Inheritance
+
+```text
+Dialect (registry machinery)
+└── CypherDialect (permissive CypherRenderer)
+    ├── Neo4jCypher5 (`neo4j5`, alias `cypher5`)
+    │   ├── Neo4jCypher25 (`neo4j25`, aliases `neo4j`, `neo`)
+    │   └── Memgraph (`memgraph`, alias `mg`)
+    └── OpenCypher (`opencypher`, OC9 caps)
+        └── PuppyGraph (engine constraints)
+```
+
 ## Registered dialects
 
-| Name | Role |
-|------|------|
-| `opencypher` | openCypher 9 baseline (validation + render) |
-| `opencypher9` | Alias for `opencypher` |
-| `neo4j` | Neo4j-oriented parse/render deltas |
-| `memgraph` | Memgraph-oriented deltas |
-| `puppygraph` | openCypher subclass + engine capability constraints |
+| Name | Aliases | Role |
+|------|---------|------|
+| `opencypher` | `cypher`, `oc`, … | openCypher 9 baseline (validation + bare pattern predicates) |
+| `opencypher9` | `oc9`, … | Alias for `opencypher` |
+| `neo4j25` | `neo4j`, `neo` | Latest Neo4j / Cypher 25 surface |
+| `neo4j5` | `cypher5` | Pinned Cypher 5 (pre–Cypher 25 clauses) |
+| `memgraph` | `mg` | Memgraph classic Cypher + MAGE procedures |
+| `puppygraph` | `puppy` | openCypher subclass + engine capability constraints |
 
 ```python
 import cypherast
@@ -22,6 +35,39 @@ cypherast.validate(q, dialect="puppygraph")
 ```
 
 List names: `cypherast.dialect_names()`.
+
+## Neutral Cypher core
+
+Semantic APIs share one pipeline:
+
+```text
+dialect parse (read= / from_ / dialect=)
+  → optional target optimize / render (write / to_)
+  → lower_to_core(…, dialect=<source surface>)
+  → neutral Cypher core
+  → planner / in-memory executor / lineage
+```
+
+`explain` / `profile` / `run` use `read=`; `lineage` uses `from_=` (text or AST); AST `execute` uses `dialect=`. All name the **source** surface that produced the tree. Internals after lowering are dialect-neutral by design — capability details are stripped at the seam, not interpreted inside the engine.
+
+`lower_to_core` returns a copy (source AST unchanged). Lowering is structural, so planner and executor lower even without a named dialect; the keyword identifies the surface, it does not switch the guarantee on. Unsupported semantic surfaces are never silently ignored — they raise `ExecuteError` (`CG1702`).
+
+| Surface | In-memory after lowering |
+|---------|--------------------------|
+| Inline pattern `WHERE` | Hoisted onto owning `MATCH` / comprehension |
+| `FOR` / `FILTER` | `UNWIND` / `WITH … WHERE` |
+| `LET a = …, b = …` | One `WITH *, item` per item (sequential scope: `b` may use `a`) |
+| `GROUP BY` metadata | Cleared **only** when the clause aggregates and the keys equal its non-aggregate projections (alias or underlying expression) |
+| `GROUP BY` keys differing from those projections, or `GROUP BY` with no aggregate | **Reject** (`CG1702`) — clearing them would change aggregate results or row counts |
+| `FILTER` item whose predicate ignores its own binding | **Reject** (`CG1702`) — `WITH * WHERE …` filters the whole row, losing the item's scope |
+| `CALL … IN TRANSACTIONS` batching metadata | Cleared (in-memory is single-process / non-batched; no transactional batch semantics) |
+| Memgraph `*bfs` | Ordinary variable-length hop |
+| Inline `WHERE` on a variable-length relationship | **Reject** (`CG1702`) — the binding is a relationship list, not a scalar |
+| Inline `WHERE` inside `shortestPath` / quantified path | **Reject** (`CG1702`) — predicate belongs to search / repetition semantics |
+| Memgraph `*wShortest` | **Reject** (`CG1702`) |
+| `SEARCH` / `LOAD CSV` / admin statements / `WHEN` | **Reject** (`CG1702`) |
+
+This documents in-memory executor support only — not live Neo4j / Memgraph / PuppyGraph parity. Dialects may still parse and render richer surfaces for transpile/optimize toward those engines.
 
 ## Capability flags
 
@@ -103,6 +149,8 @@ PuppyGraph subclasses openCypher and extends the same OC9 base via `dataclasses.
 Spec reference: [openCypher 9 (PDF)](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
 
 Conformance is measured against the official [openCypher TCK](https://github.com/opencypher/openCypher/tree/master/tck) (cloned to `/tmp` at test time — see `make test-tck-official`). Latest scoreboard: `tests/tck/results.md`.
+
+Dialect transpose: scenarios that **pass** on `opencypher` are `translate`d with `optimize=True` to `neo4j5`, `neo4j25`, `memgraph`, and `puppygraph`, then re-executed on the same in-memory graph setup (`make test-tck-dialects` → `tests/tck/results-dialects.md`). PuppyGraph capability residuals are recorded as skips (not failures); the rate gate uses the executable subset only.
 
 ## Custom dialect sketch
 

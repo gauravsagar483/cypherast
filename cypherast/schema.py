@@ -243,6 +243,23 @@ FUNCTION_ALIASES: dict[str, str] = {
 FUNCTION_VARIADIC_MIN: dict[str, int] = {"coalesce": 1}
 FUNCTION_OPTIONAL_ARGS: dict[str, int] = {"substring": 1, "range": 1}
 
+# Aggregate function names (lowercase). One catalog shared by the executor,
+# dialect aggregate validation, and neutral-core lowering.
+AGGREGATE_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "count",
+        "sum",
+        "avg",
+        "min",
+        "max",
+        "collect",
+        "stdev",
+        "stdevp",
+        "percentilecont",
+        "percentiledisc",
+    }
+)
+
 # Excluded from openCypher 9 (standardisation-scope.adoc)
 OC9_EXCLUDED_FUNCTIONS: frozenset[str] = frozenset(
     {

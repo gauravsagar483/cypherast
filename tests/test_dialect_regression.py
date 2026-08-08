@@ -15,7 +15,8 @@ from cypherast.executor.graph import Graph
 ALL_DIALECTS: tuple[str, ...] = (
     "opencypher",
     "opencypher9",
-    "neo4j",
+    "neo4j25",
+    "neo4j5",
     "memgraph",
     "puppygraph",
 )
@@ -42,6 +43,8 @@ def test_dialect_registry_includes_all_engines() -> None:
     names = set(cypherast.dialect_names())
     for name in ALL_DIALECTS:
         assert name in names, f"{name!r} missing from dialect_names()"
+    assert "neo4j25" in names
+    assert get_dialect_cls("neo4j").name == "neo4j25"
 
 
 def test_default_read_is_opencypher() -> None:

@@ -38,9 +38,9 @@ print(cypherast.transpile(q, from_="opencypher", to_="memgraph"))
 | `parse` / `parse_one` | Cypher text → AST |
 | `translate` / `transpile` | Cross-dialect rewrite |
 | `optimize` | Canonicalizer rewriter passes |
-| `explain` / `profile` | Cost / naive plan text |
-| `run` | Execute on in-memory `Graph` |
-| `lineage` | Binding-level provenance |
+| `explain` / `profile` | Cost / naive plan text (`read=` source dialect) |
+| `run` | Execute on in-memory `Graph` (`read=` source dialect) |
+| `lineage` | Binding-level provenance (`from_=` source dialect) |
 
 Full samples: [docs/api.md](docs/api.md). Guides: [docs/](docs/README.md) (AST primer, optimizer, dialects, onboarding).
 
@@ -107,29 +107,44 @@ cypherast.optimize(q, write="puppygraph", schema=schema)
 
 ### explain / profile / run
 
-```python
-from cypherast.executor import Graph
+Public text APIs take `read=` for the source dialect. Before plan / profile / execute, cypherast lowers the surface AST to a **neutral Cypher core** (`lower_to_core`). Planner and executor stay dialect-blind after that seam. Unsupported semantic surfaces raise `ExecuteError` (`CG1702`) — they are never silently ignored.
 
-print(cypherast.explain("MATCH (n:Person)-[:KNOWS]->(m) RETURN n, m"))
+```python
+from cypherast.executor import Graph, execute
+
+print(cypherast.explain(
+    "MATCH (n:Person)-[:KNOWS]->(m) RETURN n, m",
+    read="opencypher",
+))
 
 g = Graph()
 g.create_node(["Person"], {"name": "Ada", "age": 36})
 rows = cypherast.run(
-    "MATCH (n:Person) WHERE n.age > 30 RETURN n.name",
+    "MATCH (n:Person WHERE n.age > 30) RETURN n.name",
     graph=g,
+    read="neo4j25",
 )
 print(list(rows))
+
+# AST entry: dialect= names the same source surface
+tree = cypherast.parse_one("FOR n IN [1, 2] RETURN n", read="neo4j25")
+print(list(execute(tree, dialect="neo4j25")))
 ```
+
+Lowered today: inline pattern `WHERE`, `FILTER` / `FOR`, `LET` (one `WITH` per item, so a later item may reference an earlier one), redundant `GROUP BY` metadata, Memgraph `*bfs`; `CALL … IN TRANSACTIONS` batching metadata is cleared (in-memory is single-process/non-batched — no transactional batch semantics). Not executable in-memory (`CG1702`): `GROUP BY` keys that differ from the clause's non-aggregate projections (or grouping with no aggregate), inline `WHERE` on a variable-length relationship, inline `WHERE` inside `shortestPath` / quantified paths, `wShortest`, `SEARCH`, `LOAD CSV`, admin statements, `WHEN`. Parse/optimize/translate toward a live engine is separate from in-memory `run`.
 
 ### lineage
 
 ```python
 root = cypherast.lineage(
-    "MATCH (n:Person) RETURN n.name AS name",
-    binding="name",
+    "MATCH (n:Person) LET age = n.age RETURN age",
+    binding="age",
+    from_="neo4j25",
 )
 print(root)  # provenance Node; .to_html() for vis.js
 ```
+
+Bindings resolve backwards from `RETURN`, so a later `WITH` shadows an earlier alias of the same name; repeated names stop the walk (`WITH n AS n` and alias cycles terminate).
 
 ## CLI
 
@@ -156,7 +171,7 @@ make translate Q="MATCH (n:Person) RETURN n" FROM=opencypher TO=puppygraph OPT=1
 
 ## Dialects
 
-`opencypher` · `neo4j` · `memgraph` · `puppygraph` (read+write). Gremlin/GQL generators = v1.x.
+`opencypher` · `neo4j25` (`neo4j`/`neo`) · `neo4j5` (`cypher5`) · `memgraph` · `puppygraph` (read+write). Gremlin/GQL generators = v1.x.
 
 openCypher 9 spec: [openCypher9.pdf](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
 
@@ -182,9 +197,10 @@ Official [openCypher TCK](https://github.com/opencypher/openCypher/tree/master/t
 make test-tck-official          # parse + in-memory executor
 make test-tck-official-parse    # parse gate only
 make test-tck-oc9             # OC9-excluded scenario filter
+make test-tck-dialects        # transpose OC9-passing runs → neo4j5/neo4j25/memgraph/puppygraph
 ```
 
-Override feature path: `CYPHERAST_TCK_PATH=/path/to/tck/features`.
+Override feature path: `CYPHERAST_TCK_PATH=/path/to/tck/features`. Dialect matrix report: `tests/tck/results-dialects.md`.
 
 Recent scores (runnable scenarios exclude Cucumber Scenario Outline placeholders):
 
@@ -193,6 +209,8 @@ Recent scores (runnable scenarios exclude Cucumber Scenario Outline placeholders
 | Parse (1,339 real queries) | ~95% |
 | Run (executable only) | ~62% |
 | Effective run (+ expected errors) | ~65% |
+| Dialect transpose (`neo4j5`/`neo4j25`/`memgraph`) | ~97% of OC9-passing |
+| Dialect transpose (`puppygraph`, executable) | ~59% (capability skips excluded) |
 
 **Run rate notes:** The runner skips outlines, side-effect checks, unparseable queries, and procedure stubs. Scenarios that expect compile/runtime errors count as passes when cypherast rejects the query (`expected` bucket).
 

@@ -73,6 +73,9 @@ test-tck-official-parse: ## Official TCK parse gate only
 test-tck-oc9: ## Official TCK with OC9 scenario filter
 	CYPHERAST_TCK_OC9_FILTER=1 $(UV) run python -m tests.tck
 
+test-tck-dialects: ## OC9-passing scenarios transposed to neo4j5/neo4j25/memgraph/puppygraph
+	$(UV) run python -m tests.tck --dialect-matrix
+
 grammar-smoke: ## Parse-smoke queries from tools/grammar_smoke_queries.txt
 	$(PYTHON) tools/grammar_smoke.py
 

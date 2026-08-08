@@ -6,13 +6,22 @@ import argparse
 import os
 from pathlib import Path
 
-from tests.tck.runner import run_official
+from tests.tck.runner import (
+    dialect_matrix_gate_failures,
+    run_official,
+    run_official_dialect_matrix,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Run official openCypher TCK against cypherast")
     p.add_argument("--parse-only", action="store_true", help="Parse gate only (no executor)")
     p.add_argument("--oc9-filter", action="store_true", help="Skip OC9-excluded scenarios")
+    p.add_argument(
+        "--dialect-matrix",
+        action="store_true",
+        help="Transpose OC9-passing scenarios to neo4j5/neo4j25/memgraph/puppygraph",
+    )
     p.add_argument(
         "--dialect",
         default=os.environ.get("CYPHERAST_TCK_DIALECT", "opencypher"),
@@ -21,8 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--report",
         type=Path,
-        default=Path(__file__).parent / "results.md",
-        help="Markdown report path (default: tests/tck/results.md)",
+        default=None,
+        help="Markdown report path (default: results.md or results-dialects.md)",
     )
     args = p.parse_args(argv)
     oc9 = args.oc9_filter or os.environ.get("CYPHERAST_TCK_OC9_FILTER", "").lower() in {
@@ -31,14 +40,25 @@ def main(argv: list[str] | None = None) -> int:
         "yes",
     }
 
+    if args.dialect_matrix:
+        report = args.report or Path(__file__).parent / "results-dialects.md"
+        board = run_official_dialect_matrix(oc9_filter=oc9, report_path=report)
+        print(board.summary())
+        print(f"Report: {report}")
+        gate = dialect_matrix_gate_failures(board)
+        for message in gate:
+            print(f"gate failure: {message}")
+        return 1 if gate else 0
+
+    report = args.report or Path(__file__).parent / "results.md"
     board = run_official(
         parse_only=args.parse_only,
         oc9_filter=oc9,
-        report_path=args.report,
+        report_path=report,
         dialect=args.dialect,
     )
     print(board.summary())
-    print(f"Report: {args.report}")
+    print(f"Report: {report}")
     failures = [r for r in board.results if not r.passed and r.kind != "skip"]
     return 1 if failures else 0
 

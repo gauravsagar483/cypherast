@@ -3,24 +3,53 @@
 from __future__ import annotations
 
 import typing as t
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from cypherast import ast as a
 from cypherast.errors import ParseError, Position
 from cypherast.lexer import Lexer, Token, TokenKind
 
+# Mirrors CPython's default ``sys.getrecursionlimit()``. Nesting beyond this
+# raises ParseError CG1105 instead of an uncatchable interpreter crash.
+MAX_PARSE_DEPTH = 1000
+
+
+class _ParseDepthExceeded(Exception):
+    """Internal signal: nesting guard tripped.
+
+    Not a ``ParseError`` so the parser's speculative ``except ParseError``
+    backtracking cannot swallow it; ``parse`` converts it to CG1105.
+    """
+
 
 class Parser:
     """Handwritten recursive-descent parser for openCypher core (+ Neo4j/GQL tolerant bits)."""
 
-    def __init__(self, source: str, dialect: str | None = None) -> None:
+    def __init__(
+        self,
+        source: str,
+        dialect: str | None = None,
+        max_depth: int = MAX_PARSE_DEPTH,
+    ) -> None:
         self.source = source
         self.dialect = dialect
+        self.max_depth = max_depth
         self.tokens = Lexer(source).tokenize()
         self._i = 0
+        self._depth = 0
 
     # --- public -----------------------------------------------------------
 
     def parse(self) -> a.AstNode:
+        try:
+            return self._parse_root()
+        except (_ParseDepthExceeded, RecursionError) as exc:
+            # One nesting level costs several Python frames, so the interpreter
+            # limit can trip before ``max_depth``; report the same diagnostic.
+            raise self._depth_error() from exc
+
+    def _parse_root(self) -> a.AstNode:
         version = None
         if self._match(TokenKind.CYPHER) and self._check(TokenKind.INTEGER):
             version = int(self._advance().text)
@@ -35,23 +64,51 @@ class Parser:
         return a.Cypher(this=node, version=version)
 
     def parse_statement(self) -> a.AstNode:
-        left: a.AstNode = self.parse_query()
-        while self._match(TokenKind.UNION):
-            distinct = not self._match(TokenKind.ALL)
-            right = self.parse_query()
-            left = a.Union(this=left, expression=right, distinct=distinct)
-        # GQL NEXT chaining (parse-tolerant)
-        while self._match(TokenKind.NEXT):
-            right = self.parse_query()
-            left = a.Next(this=left, expression=right)
-        return left
+        with self._nesting():
+            if self._check(TokenKind.WHEN) and self._dialect_allows("allow_when_query"):
+                return self.parse_when_query()
+            left: a.AstNode = self.parse_query()
+            while self._match(TokenKind.UNION):
+                distinct = not self._match(TokenKind.ALL)
+                right = self.parse_query()
+                left = a.Union(this=left, expression=right, distinct=distinct)
+            # GQL NEXT chaining (parse-tolerant)
+            while self._match(TokenKind.NEXT):
+                right = self.parse_query()
+                left = a.Next(this=left, expression=right)
+            return left
 
     def parse_query(self) -> a.Query:
         clauses: list[a.AstNode] = []
         if self._match(TokenKind.USE):
             clauses.append(a.Use(graph=self.parse_expression()))
         while True:
-            if self._check(TokenKind.OPTIONAL) or self._check(TokenKind.MATCH):
+            if (
+                self._check_word("LOAD")
+                and self._check_word("CSV", 1)
+                and self._dialect_allows("allow_load_csv")
+            ):
+                clauses.append(self.parse_load_csv())
+            elif self._check(TokenKind.FILTER) and self._dialect_allows("allow_filter_clause"):
+                clauses.append(self.parse_filter())
+            elif self._check(TokenKind.LET) and self._dialect_allows("allow_let_clause"):
+                clauses.append(self.parse_let())
+            elif self._check(TokenKind.FOR) and self._dialect_allows("allow_for_clause"):
+                clauses.append(self.parse_for())
+            elif self._dialect_allows("allow_admin_ddl") and (
+                self._check_word("SHOW")
+                or (
+                    self._check(TokenKind.CREATE)
+                    and self._peek_ahead_text(1) in ("INDEX", "CONSTRAINT")
+                )
+            ):
+                clauses.append(self.parse_admin_statement())
+                break
+            elif self._check(TokenKind.CALL) or (
+                self._check(TokenKind.OPTIONAL) and self._check_ahead(TokenKind.CALL)
+            ):
+                clauses.append(self.parse_call())
+            elif self._check(TokenKind.OPTIONAL) or self._check(TokenKind.MATCH):
                 clauses.append(self.parse_match())
             elif self._check(TokenKind.UNWIND):
                 clauses.append(self.parse_unwind())
@@ -69,8 +126,6 @@ class Parser:
                 clauses.append(self.parse_remove())
             elif self._check(TokenKind.FOREACH):
                 clauses.append(self.parse_foreach())
-            elif self._check(TokenKind.CALL):
-                clauses.append(self.parse_call())
             elif self._check(TokenKind.INSERT):
                 clauses.append(self.parse_insert())
             elif self._check(TokenKind.RETURN):
@@ -91,11 +146,20 @@ class Parser:
         optional = self._match(TokenKind.OPTIONAL)
         self._expect(TokenKind.MATCH)
         pattern = self.parse_pattern()
+        search = None
+        if self._check_word("SEARCH") and self._dialect_allows("allow_search_clause"):
+            search = self.parse_search()
         where = None
         if self._match(TokenKind.WHERE):
             where = a.Where(this=self.parse_expression())
         hints = self._parse_match_hints()
-        return a.Match(pattern=pattern, optional=optional or None, where=where, hints=hints)
+        return a.Match(
+            pattern=pattern,
+            optional=optional or None,
+            where=where,
+            hints=hints,
+            search=search,
+        )
 
     def _parse_match_hints(self) -> list[str] | None:
         hints: list[str] = []
@@ -135,6 +199,8 @@ class Parser:
         self._expect(TokenKind.WITH)
         distinct = self._match(TokenKind.DISTINCT)
         exprs = self.parse_return_items()
+        # GROUP BY precedes the ORDER BY / SKIP / LIMIT tail (Cypher 25 clause order).
+        group_by = self._parse_group_by()
         order = self.parse_order_by() if self._check(TokenKind.ORDER) else None
         skip = a.Skip(this=self.parse_expression()) if self._match(TokenKind.SKIP) else None
         limit = a.Limit(this=self.parse_expression()) if self._match(TokenKind.LIMIT) else None
@@ -146,12 +212,14 @@ class Parser:
             skip=skip,
             limit=limit,
             where=where,
+            group_by=group_by,
         )
 
     def parse_return(self) -> a.Return:
         self._expect(TokenKind.RETURN)
         distinct = self._match(TokenKind.DISTINCT)
         exprs = self.parse_return_items()
+        group_by = self._parse_group_by()
         order = self.parse_order_by() if self._check(TokenKind.ORDER) else None
         skip = a.Skip(this=self.parse_expression()) if self._match(TokenKind.SKIP) else None
         limit = a.Limit(this=self.parse_expression()) if self._match(TokenKind.LIMIT) else None
@@ -161,6 +229,7 @@ class Parser:
             order=order,
             skip=skip,
             limit=limit,
+            group_by=group_by,
         )
 
     def parse_return_items(self) -> list[a.AstNode]:
@@ -309,9 +378,14 @@ class Parser:
 
     def parse_call(self) -> a.CallSubquery | a.CallProcedure:
         """Parse ``CALL { … }`` subquery or ``CALL ns.proc(…) [YIELD …]``."""
+        optional = self._match(TokenKind.OPTIONAL)
+        if optional and not self._dialect_allows("allow_optional_call"):
+            raise self._err("OPTIONAL CALL requires neo4j25", code="CG1102")
         self._expect(TokenKind.CALL)
-        if self._check(TokenKind.LBRACE):
-            return self._parse_call_subquery_body()
+        if self._check(TokenKind.LPAREN) or self._check(TokenKind.LBRACE):
+            return self._parse_call_subquery_body(optional=optional or None)
+        if optional:
+            raise self._err("OPTIONAL CALL requires a subquery", code="CG1102")
         return self._parse_call_procedure_body()
 
     def parse_call_subquery(self) -> a.CallSubquery:
@@ -319,11 +393,44 @@ class Parser:
         self._expect(TokenKind.CALL)
         return self._parse_call_subquery_body()
 
-    def _parse_call_subquery_body(self) -> a.CallSubquery:
+    def _parse_call_subquery_body(self, *, optional: bool | None = None) -> a.CallSubquery:
+        variables: list[a.AstNode] | a.Star | None = None
+        if self._match(TokenKind.LPAREN):
+            if not self._dialect_allows("allow_call_variable_import"):
+                raise self._err(
+                    "CALL (vars) import requires neo4j5+ dialect",
+                    code="CG1102",
+                )
+            if self._match(TokenKind.STAR):
+                variables = a.Star()
+            else:
+                variables = []
+                while True:
+                    variables.append(self.parse_variable())
+                    if not self._match(TokenKind.COMMA):
+                        break
+            self._expect(TokenKind.RPAREN)
         self._expect(TokenKind.LBRACE)
         inner = self.parse_statement()
         self._expect(TokenKind.RBRACE)
-        return a.CallSubquery(query=inner)
+        in_transactions = False
+        transaction_rows: a.AstNode | None = None
+        if self._check(TokenKind.IN) and self._check_word("TRANSACTIONS", 1):
+            if not self._dialect_allows("allow_call_in_transactions"):
+                raise self._err("IN TRANSACTIONS requires neo4j25", code="CG1102")
+            self._advance()
+            self._expect_word("TRANSACTIONS")
+            in_transactions = True
+            if self._match_word("OF"):
+                transaction_rows = self.parse_expression()
+                self._match_word("ROWS")
+        return a.CallSubquery(
+            query=inner,
+            variables=variables,
+            optional=optional,
+            in_transactions=in_transactions or None,
+            transaction_rows=transaction_rows,
+        )
 
     def _parse_call_procedure_body(self) -> a.CallProcedure:
         """``ns.proc(args) [YIELD items|*] [WHERE expr]`` (CALL already consumed)."""
@@ -371,6 +478,10 @@ class Parser:
         return a.Pattern(paths=paths)
 
     def parse_path_pattern(self) -> a.PathPattern:
+        with self._nesting():
+            return self._parse_path_pattern_body()
+
+    def _parse_path_pattern_body(self) -> a.PathPattern:
         variable = None
         # named path: p = (n)-[]->(m)
         if self._check(TokenKind.IDENT) and self._check_ahead(TokenKind.EQ):
@@ -451,15 +562,44 @@ class Parser:
             labels = self._parse_labels()
         if self._check(TokenKind.LBRACE):
             properties = self.parse_map_literal()
+        where = None
+        if self._match(TokenKind.WHERE):
+            if not self._dialect_allows("allow_inline_pattern_where"):
+                raise self._err(
+                    "Inline pattern WHERE requires neo4j5+ dialect",
+                    code="CG1102",
+                )
+            where = a.Where(this=self.parse_expression())
         self._expect(TokenKind.RPAREN)
-        return a.NodePattern(variable=variable, labels=labels, properties=properties)
+        return a.NodePattern(variable=variable, labels=labels, properties=properties, where=where)
 
     def _parse_labels(self) -> a.LabelExpression:
-        """Parse ``:A:B`` (AND) or ``:A|B`` (OR expression)."""
-        labels: list[str] = []
+        """Parse ``:A:B`` (AND), ``:A|B`` (OR), or ``:!A&B`` label expressions."""
         if not self._match(TokenKind.COLON):
             return a.LabelExpression(labels=[])
+        if self._dialect_allows("allow_dynamic_labels") and self._check(TokenKind.PARAMETER):
+            param = self.parse_primary()
+            if isinstance(param, a.Parameter):
+                return a.LabelExpression(labels=[], expression=f"${param.name}")
+        if self._dialect_allows("allow_label_expressions") and (
+            self._check(TokenKind.BANG) or self._check(TokenKind.LPAREN)
+        ):
+            return a.LabelExpression(labels=[], expression=self._parse_label_expr_text())
         first = self._parse_unquoted_name()
+        if self._dialect_allows("allow_label_expressions") and self._check_any(
+            TokenKind.AMP, TokenKind.PIPE, TokenKind.PERCENT
+        ):
+            body = first
+            while True:
+                if self._match(TokenKind.AMP):
+                    body += "&" + self._parse_unquoted_name()
+                elif self._match(TokenKind.PIPE):
+                    body += "|" + self._parse_unquoted_name()
+                elif self._match(TokenKind.PERCENT):
+                    body += "%"
+                else:
+                    break
+            return a.LabelExpression(labels=[], expression=body)
         if self._match(TokenKind.PIPE):
             parts = [first]
             while True:
@@ -467,10 +607,30 @@ class Parser:
                 if not self._match(TokenKind.PIPE):
                     break
             return a.LabelExpression(labels=[], expression="|".join(parts))
-        labels.append(first)
+        labels = [first]
         while self._match(TokenKind.COLON):
             labels.append(self._parse_unquoted_name())
         return a.LabelExpression(labels=labels)
+
+    def _parse_label_expr_text(self) -> str:
+        parts: list[str] = []
+        while True:
+            if self._match(TokenKind.BANG):
+                parts.append("!")
+            elif self._match(TokenKind.LPAREN):
+                inner = self._parse_label_expr_text()
+                parts.append(f"({inner})")
+                self._expect(TokenKind.RPAREN)
+            else:
+                parts.append(self._parse_unquoted_name())
+            if self._match(TokenKind.AMP):
+                parts.append("&")
+                continue
+            if self._match(TokenKind.PIPE):
+                parts.append("|")
+                continue
+            break
+        return "".join(parts)
 
     def _parse_unquoted_name(self) -> str:
         """Label, rel type, property, or map key — keywords allowed (e.g. ``End``, ``count``)."""
@@ -543,8 +703,13 @@ class Parser:
                 # optional colon before next type
                 self._match(TokenKind.COLON)
                 types.append(self._parse_type_name())
+        memgraph_quantifier: str | None = None
+        memgraph_weight_expr: a.AstNode | None = None
+        memgraph_total_weight: a.AstNode | None = None
         if self._match(TokenKind.STAR):
             variable_length = True
+            if self._dialect_allows("allow_memgraph_rel_quantifiers"):
+                memgraph_quantifier = self._parse_memgraph_quantifier_name()
             if self._check(TokenKind.INTEGER):
                 min_hops = int(self._advance().text)
                 if self._match(TokenKind.DOTDOT):
@@ -555,11 +720,26 @@ class Parser:
                 min_hops = 1
                 if self._check(TokenKind.INTEGER):
                     max_hops = int(self._advance().text)
-            else:
+            elif memgraph_quantifier is None:
                 min_hops = 1
                 max_hops = None
+            if memgraph_quantifier is not None:
+                # Memgraph puts the lambda and total-weight binding after the bounds:
+                # ``*wShortest 5 (e, n | e.weight) total``.
+                if self._check(TokenKind.LPAREN):
+                    memgraph_weight_expr = self._parse_relationship_lambda()
+                if memgraph_quantifier == "wShortest" and self._check(TokenKind.IDENT):
+                    memgraph_total_weight = self.parse_variable()
         if self._check(TokenKind.LBRACE):
             properties = self.parse_map_literal()
+        where = None
+        if self._match(TokenKind.WHERE):
+            if not self._dialect_allows("allow_inline_pattern_where"):
+                raise self._err(
+                    "Inline pattern WHERE requires neo4j5+ dialect",
+                    code="CG1102",
+                )
+            where = a.Where(this=self.parse_expression())
         self._expect(TokenKind.RBRACKET)
         return a.RelationshipPattern(
             variable=variable,
@@ -569,6 +749,37 @@ class Parser:
             min_hops=min_hops,
             max_hops=max_hops,
             variable_length=variable_length or None,
+            where=where,
+            memgraph_quantifier=memgraph_quantifier,
+            memgraph_weight_expr=memgraph_weight_expr,
+            memgraph_total_weight=memgraph_total_weight,
+        )
+
+    def _parse_memgraph_quantifier_name(self) -> str | None:
+        if not self._check(TokenKind.IDENT):
+            return None
+        qname = self._peek().text.lower()
+        if qname == "bfs":
+            self._advance()
+            return "bfs"
+        if qname in ("wshortest", "wshortestpath"):
+            self._advance()
+            return "wShortest"
+        return None
+
+    def _parse_relationship_lambda(self) -> a.RelationshipLambda:
+        """``(rel, node | expr)`` weight or filter lambda on a Memgraph quantifier."""
+        self._expect(TokenKind.LPAREN)
+        relationship = self.parse_variable()
+        self._expect(TokenKind.COMMA)
+        node = self.parse_variable()
+        self._expect(TokenKind.PIPE)
+        expression = self.parse_expression()
+        self._expect(TokenKind.RPAREN)
+        return a.RelationshipLambda(
+            relationship=relationship,
+            node=node,
+            expression=expression,
         )
 
     def _parse_type_name(self) -> str:
@@ -602,7 +813,8 @@ class Parser:
     # --- expressions (Pratt-ish precedence climbing) ----------------------
 
     def parse_expression(self) -> a.AstNode:
-        return self.parse_or()
+        with self._nesting():
+            return self.parse_or()
 
     def parse_expression_list(self) -> list[a.AstNode]:
         items = [self.parse_expression()]
@@ -831,18 +1043,36 @@ class Parser:
                     name = "allShortestPaths"
                 else:
                     name = name.lower()
+            if self._check(TokenKind.DOT):
+                probe = self._i
+                dotted = name
+                while self._match(TokenKind.DOT):
+                    dotted += "." + self._parse_unquoted_name()
+                if self._match(TokenKind.LPAREN):
+                    distinct = self._match(TokenKind.DISTINCT)
+                    if self._match(TokenKind.STAR) and dotted.lower() == "count":
+                        self._expect(TokenKind.RPAREN)
+                        return a.FunctionCall(name="count", expressions=[a.Star()], distinct=None)
+                    args: list[a.AstNode] = []
+                    if not self._check(TokenKind.RPAREN):
+                        args = self.parse_expression_list()
+                    self._expect(TokenKind.RPAREN)
+                    if dotted.lower() == "coalesce":
+                        return a.Coalesce(expressions=args)
+                    return a.FunctionCall(name=dotted, expressions=args, distinct=distinct or None)
+                self._i = probe
             if self._match(TokenKind.LPAREN):
                 distinct = self._match(TokenKind.DISTINCT)
                 if self._match(TokenKind.STAR) and name.lower() == "count":
                     self._expect(TokenKind.RPAREN)
                     return a.FunctionCall(name="count", expressions=[a.Star()], distinct=None)
-                args: list[a.AstNode] = []
+                fn_args: list[a.AstNode] = []
                 if not self._check(TokenKind.RPAREN):
-                    args = self.parse_expression_list()
+                    fn_args = self.parse_expression_list()
                 self._expect(TokenKind.RPAREN)
                 if name.lower() == "coalesce":
-                    return a.Coalesce(expressions=args)
-                return a.FunctionCall(name=name, expressions=args, distinct=distinct or None)
+                    return a.Coalesce(expressions=fn_args)
+                return a.FunctionCall(name=name, expressions=fn_args, distinct=distinct or None)
             return a.Identifier(this=name)
         raise self._err(f"Unexpected token {tok.text!r}", code="CG1101")
 
@@ -1085,6 +1315,162 @@ class Parser:
             return a.Identifier(this=self._name_from_token(tok))
         raise self._err(f"mismatched input {tok.text!r}", code="CG1102")
 
+    def parse_filter(self) -> a.Filter:
+        self._expect(TokenKind.FILTER)
+        self._expect(TokenKind.LPAREN)
+        items: list[a.FilterItem] = []
+        while True:
+            var = self.parse_variable()
+            self._expect(TokenKind.WHERE)
+            pred = self.parse_expression()
+            items.append(a.FilterItem(variable=var, predicate=pred))
+            if not self._match(TokenKind.COMMA):
+                break
+        self._expect(TokenKind.RPAREN)
+        return a.Filter(items=items)
+
+    def parse_let(self) -> a.Let:
+        self._expect(TokenKind.LET)
+        items: list[a.AstNode] = []
+        while True:
+            var = self.parse_variable()
+            self._expect(TokenKind.EQ)
+            expr = self.parse_expression()
+            items.append(a.Alias(this=expr, alias=var))
+            if not self._match(TokenKind.COMMA):
+                break
+        return a.Let(items=items)
+
+    def parse_for(self) -> a.For:
+        self._expect(TokenKind.FOR)
+        alias = self.parse_variable()
+        self._expect(TokenKind.IN)
+        expr = self.parse_expression()
+        return a.For(expression=expr, alias=alias)
+
+    def parse_load_csv(self) -> a.LoadCsv:
+        self._expect_word("LOAD")
+        self._expect_word("CSV")
+        with_headers = False
+        if self._match(TokenKind.WITH):
+            self._expect_word("HEADERS")
+            with_headers = True
+        self._expect_word("FROM")
+        url = self.parse_expression()
+        self._expect(TokenKind.AS)
+        alias = self.parse_variable()
+        fieldterminator = None
+        if self._match_word("FIELDTERMINATOR"):
+            fieldterminator = self.parse_expression()
+        return a.LoadCsv(
+            url=url,
+            alias=alias,
+            with_headers=with_headers or None,
+            fieldterminator=fieldterminator,
+        )
+
+    def parse_search(self) -> a.Search:
+        self._expect_word("SEARCH")
+        variable = self.parse_variable()
+        self._expect(TokenKind.IN)
+        self._expect(TokenKind.LPAREN)
+        self._expect_word("VECTOR")
+        self._expect(TokenKind.INDEX)
+        index_name = self.parse_expression()
+        self._expect(TokenKind.FOR)
+        vector_expr = self.parse_expression()
+        limit = None
+        if self._match(TokenKind.LIMIT):
+            limit = self.parse_expression()
+        self._expect(TokenKind.RPAREN)
+        score_alias = None
+        if self._match_word("SCORE"):
+            self._expect(TokenKind.AS)
+            score_alias = self.parse_variable()
+        return a.Search(
+            variable=variable,
+            index_name=index_name,
+            vector_expr=vector_expr,
+            limit=limit,
+            score_alias=score_alias,
+        )
+
+    def parse_when_query(self) -> a.WhenQuery:
+        branches: list[a.AstNode] = []
+        while self._match(TokenKind.WHEN):
+            cond = self.parse_expression()
+            self._expect(TokenKind.THEN)
+            self._expect(TokenKind.LBRACE)
+            query = self.parse_statement()
+            self._expect(TokenKind.RBRACE)
+            branches.append(a.WhenBranch(condition=cond, query=query))
+        default = None
+        if self._match(TokenKind.ELSE):
+            self._expect(TokenKind.LBRACE)
+            default = self.parse_statement()
+            self._expect(TokenKind.RBRACE)
+        return a.WhenQuery(branches=branches, default=default)
+
+    def parse_admin_statement(self) -> a.AdminStatement:
+        """Capture the statement verbatim — admin DDL is passed through, not modelled.
+
+        The source slice is kept because re-joining token text loses the original
+        spacing, punctuation, and string quoting (``ON :Person(name)``).
+        """
+        start = self._peek().position.offset
+        end = len(self.source)
+        while not self._check(TokenKind.EOF):
+            if self._check(TokenKind.RETURN):
+                end = self._peek().position.offset
+                break
+            self._advance()
+        return a.AdminStatement(text=self.source[start:end].strip())
+
+    def _parse_group_by(self) -> a.GroupBy | None:
+        if not (self._check_word("GROUP") and self._check_ahead(TokenKind.BY)):
+            return None
+        self._advance()
+        if not self._dialect_allows("allow_group_by_subclause"):
+            raise self._err("GROUP BY requires neo4j25 dialect", code="CG1102")
+        self._expect(TokenKind.BY)
+        return a.GroupBy(expressions=self.parse_return_items())
+
+    def _dialect_allows(self, flag: str) -> bool:
+        if not self.dialect:
+            return True
+        from cypherast.dialects.dialect import get_dialect_cls
+
+        caps = get_dialect_cls(self.dialect).capabilities
+        return bool(getattr(caps, flag, False))
+
+    def _peek_ahead_text(self, n: int) -> str:
+        return self._peek(n).text.upper()
+
+    # --- contextual words -------------------------------------------------
+    # Words Neo4j does not reserve (LOAD, CSV, GROUP, ROWS, SEARCH, …) stay IDENT so
+    # they remain usable as variables and property names; clause parsers match them
+    # by text instead of by TokenKind.
+
+    def _check_word(self, word: str, n: int = 0) -> bool:
+        tok = self._peek(n)
+        return tok.kind is TokenKind.IDENT and tok.text.upper() == word
+
+    def _match_word(self, word: str) -> bool:
+        if self._check_word(word):
+            self._advance()
+            return True
+        return False
+
+    def _expect_word(self, word: str) -> Token:
+        if self._check_word(word):
+            return self._advance()
+        tok = self._peek()
+        raise self._err(
+            f"mismatched input {tok.text!r}",
+            code="CG1102",
+            expected={word},
+        )
+
     # --- token helpers ----------------------------------------------------
 
     def _peek(self, n: int = 0) -> Token:
@@ -1122,6 +1508,29 @@ class Parser:
             f"mismatched input {tok.text!r}",
             code="CG1102",
             expected={kind.name},
+        )
+
+    # --- nesting guard ----------------------------------------------------
+
+    @contextmanager
+    def _nesting(self) -> Iterator[None]:
+        self._depth += 1
+        try:
+            if self._depth > self.max_depth:
+                raise _ParseDepthExceeded
+            yield
+        finally:
+            self._depth -= 1
+
+    def _depth_error(self) -> ParseError:
+        return ParseError(
+            "maximum recursion depth exceeded while parsing",
+            code="CG1105",
+            position=self._peek().position,
+            hint=(
+                f"reduce query nesting (MAX_PARSE_DEPTH={self.max_depth}; "
+                "the interpreter stack can trip sooner)"
+            ),
         )
 
     def _err(

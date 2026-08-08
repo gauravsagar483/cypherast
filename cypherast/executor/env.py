@@ -265,7 +265,10 @@ def eval_expr(node: a.AstNode, env: Env) -> t.Any:
             if node.variable:
                 inner = inner.bind(node.variable.this, row.get(node.variable.this))
             if node.where is not None:
-                w = cypher_true(eval_expr(node.where, inner))
+                # Parser and core lowering both wrap the predicate in ``Where``;
+                # a bare expression is still accepted.
+                pred = node.where.this if isinstance(node.where, a.Where) else node.where
+                w = cypher_true(eval_expr(pred, inner))
                 if w is not True:
                     continue
             comp_out.append(eval_expr(node.projection, inner))

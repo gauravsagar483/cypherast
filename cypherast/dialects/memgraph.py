@@ -1,33 +1,25 @@
-"""Memgraph dialect."""
+"""Memgraph dialect (Neo4j Cypher 5 base + Memgraph-specific surface)."""
 
 from __future__ import annotations
 
-from cypherast import ast as a
-from cypherast.dialects.dialect import Dialect, register
+import typing as t
+
+from cypherast.dialects.capabilities import MEMGRAPH_CAPABILITIES
+from cypherast.dialects.cypher import CypherRenderer, build_unsupported
+from cypherast.dialects.dialect import register
+from cypherast.dialects.neo4j import Neo4jCypher5
 from cypherast.renderer import Renderer
 
 
-class MemgraphRenderer(Renderer):
+class MemgraphRenderer(CypherRenderer):
     dialect_name = "memgraph"
-    unsupported: set[type[a.AstNode]] = {
-        a.Next,
-        a.Insert,
-        a.CreateGraphType,
-        a.GraphTypeRef,
-        a.SessionCommand,
-        a.TransactionCommand,
-        a.BindingTable,
-        a.ValueTable,
-        a.Use,
-        a.QuantifiedPath,
-    }
+    capabilities = MEMGRAPH_CAPABILITIES
+    unsupported = build_unsupported(MEMGRAPH_CAPABILITIES)
 
 
 @register
-class Memgraph(Dialect):
+class Memgraph(Neo4jCypher5):
     name = "memgraph"
     aliases = ["mg"]
-
-    @classmethod
-    def renderer(cls) -> Renderer:
-        return MemgraphRenderer()
+    capabilities = MEMGRAPH_CAPABILITIES
+    renderer_cls: t.ClassVar[type[Renderer]] = MemgraphRenderer

@@ -119,9 +119,82 @@ def lineage(
                 f"Cannot find binding {binding!r} in RETURN",
                 code="CG1203",
             )
-        return _to_node(binding, projections[binding], ret, on_node=on_node)
+        expr = _resolve_through_with(projections[binding], query, ret=ret)
+        return _to_node(binding, expr, ret, on_node=on_node)
 
-    return {name: _to_node(name, expr, ret, on_node=on_node) for name, expr in projections.items()}
+    return {
+        name: _to_node(name, _resolve_through_with(expr, query, ret=ret), ret, on_node=on_node)
+        for name, expr in projections.items()
+    }
+
+
+def _resolve_through_with(
+    expr: a.AstNode,
+    query: a.AstNode,
+    *,
+    ret: a.Return | None = None,
+) -> a.AstNode:
+    """Follow RETURN identifiers to defining expressions on preceding WITH aliases.
+
+    Resolution walks backwards from the RETURN so a later WITH shadows an earlier
+    alias of the same name. Each hop searches only clauses before the definition
+    it just used, and repeated names stop the walk, so ``WITH n AS n`` and alias
+    cycles terminate with the last useful expression.
+
+    Core-only: surface ``Let`` is not consulted — callers must lower first.
+    """
+    if not isinstance(expr, a.Identifier):
+        return expr
+    if isinstance(query, a.Union):
+        # Prefer left branch definitions for simple UNION lineage.
+        left = query.this
+        return _resolve_through_with(expr, left, ret=_find_return(left))
+    if not isinstance(query, a.Query):
+        return expr
+
+    clauses = list(query.clauses or [])
+    index = _clause_index(clauses, ret) if ret is not None else len(clauses)
+    current: a.AstNode = expr
+    seen: set[str] = set()
+    while isinstance(current, a.Identifier):
+        name = str(current.this)
+        if name in seen:
+            return current
+        seen.add(name)
+        found = _nearest_definition(clauses, name, before=index)
+        if found is None:
+            return current
+        index, current = found
+    return current
+
+
+def _clause_index(clauses: list[a.AstNode], ret: a.Return) -> int:
+    for i, clause in enumerate(clauses):
+        if clause is ret:
+            return i
+    return len(clauses)
+
+
+def _nearest_definition(
+    clauses: list[a.AstNode],
+    name: str,
+    *,
+    before: int,
+) -> tuple[int, a.AstNode] | None:
+    """Nearest ``WITH`` alias defining ``name`` strictly before index ``before``."""
+    for i in range(min(before, len(clauses)) - 1, -1, -1):
+        clause = clauses[i]
+        if not isinstance(clause, a.With):
+            continue
+        for item in clause.expressions or []:
+            if (
+                isinstance(item, a.Alias)
+                and isinstance(item.alias, a.Identifier)
+                and item.alias.this == name
+                and isinstance(item.this, a.AstNode)
+            ):
+                return i, item.this
+    return None
 
 
 def _find_return(node: a.AstNode) -> a.Return | None:

@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Versioned Neo4j dialects: `neo4j25` (aliases `neo4j`, `neo`) for the Cypher 25
+  surface and `neo4j5` (alias `cypher5`) pinned to pre–Cypher 25. Both descend from a
+  shared `CypherDialect` / `CypherRenderer` base (`cypherast/dialects/cypher.py`) that
+  `memgraph` and `opencypher` also inherit, so pattern-predicate style and unsupported
+  node sets are declared per dialect instead of duplicated per renderer.
+- Cypher 25 and Memgraph surface parse + render + validate, each behind a
+  `DialectCapabilities` flag rather than a dialect-name check: `FILTER`, `FOR`, `LET`,
+  `GROUP BY` subclause, `SEARCH`, `WHEN … THEN { … }`, `CALL (vars) { … }`,
+  `OPTIONAL CALL`, `CALL … IN TRANSACTIONS OF n ROWS`, inline pattern `WHERE` (node and
+  relationship), label expressions, `LOAD CSV`, admin DDL passthrough, and Memgraph
+  `*bfs` / `*wShortest` relationship quantifiers. Unsupported surfaces report `CG1520`
+  (needs Cypher 25) or `CG1401` / `CG1521` (not in this dialect). The words these clauses
+  introduce (`LOAD`, `CSV`, `FROM`, `HEADERS`, `FIELDTERMINATOR`, `GROUP`, `OF`,
+  `TRANSACTIONS`, `ROWS`, `SEARCH`, `VECTOR`, `SCORE`, `SHOW`, `CONSTRAINT`, `ASSERT`,
+  `UNIQUE`) are matched contextually, so they stay usable as variables and property names.
+- Rendering now refuses constructs the target dialect does not declare, raising
+  `CompatibilityError` (`CG1401`) instead of emitting text the engine would reject —
+  `FILTER`, `FOR`, `LET`, `GROUP BY`, `SEARCH`, `WHEN`, `LOAD CSV`, admin statements, and
+  Memgraph relationship quantifiers are each gated by their capability flag.
+- Admin DDL keeps its original source text verbatim (`CREATE INDEX ON :Person(name)`
+  round-trips), and Memgraph weight lambdas parse into a `RelationshipLambda` node rather
+  than captured token text, so `*wShortest (e, n | e.weight) total` round-trips.
+- Neutral Cypher core lowering seam (`cypherast/dialects/lower.py`,
+  `lower_to_core(tree, dialect=…)`): dialect parse → optional target optimize/render
+  → lowering → dialect-neutral planner / in-memory executor / lineage. Lowering
+  returns a copy, so source trees keep their surface nodes.
+- `execute(tree, …, dialect=…)` names the source surface for AST entry, matching
+  `read=` (`explain` / `profile` / `run`) and `from_` (`lineage`). Internal
+  `cypherast.planner` entry points accept the same keyword-only `dialect=`.
+- Lowered for in-memory use: inline pattern `WHERE` (hoisted onto the owning `MATCH`
+  or pattern comprehension), `FOR` → `UNWIND`, `FILTER` → `WITH … WHERE`,
+  `LET` → one `WITH *, item` per item (sequential scope, so a later item may
+  reference an earlier one), Memgraph `*bfs` → ordinary variable-length hop.
+- Parser nesting guard: `cypherast.parser.MAX_PARSE_DEPTH` (`1000`, CPython's default
+  recursion limit; overridable via `Parser(source, max_depth=…)`) counted over statement,
+  expression, and path-pattern nesting. Overflow — from the guard or from the interpreter
+  stack, which trips first because one nesting level costs several frames — raises
+  `ParseError` **CG1105** with the offending position instead of letting a bare
+  `RecursionError` escape `parse()`.
+- `AGGREGATE_FUNCTIONS` in `cypherast/schema.py` — one aggregate-name catalog shared
+  by the executor, dialect aggregate validation, and core lowering.
+- TCK dialect transpose matrix (`make test-tck-dialects`,
+  `tests/tck/results-dialects.md`) with one shared gate for the CLI and pytest:
+  per-target run-rate floors plus minimum executable count and maximum skip ratio,
+  so mass capability skips fail even at a 100% run rate. Report gained a skip-ratio
+  column.
+
+### Changed
+
+- `neo4j` (and `neo`) now resolve to the Cypher 25 surface (`neo4j25`); `cypher5` is an
+  alias of `neo4j5` instead of `neo4j`. Pin `read=`/`write=` to `neo4j5` to keep the
+  previous pre–Cypher 25 behaviour.
+- Planning, profiling, and execution always lower to core, so the neutral-core
+  guarantee is structural instead of depending on the caller passing `dialect=`
+  (lowering already-core AST is idempotent).
+- `GROUP BY` metadata is cleared only when the clause aggregates and its keys equal
+  the clause's non-aggregate projections (comparing the underlying expression or its
+  alias). Mismatched keys, or grouping with no aggregate projection, raise
+  `ExecuteError` (`CG1702`) instead of being dropped, which would have silently
+  changed aggregate results or row counts.
+- `CALL … IN TRANSACTIONS` batching metadata is still cleared: in-memory execution
+  is single-process and non-batched, so there are no transactional batch semantics.
+- Rejected during lowering (`ExecuteError` `CG1702`, never silently ignored):
+  inline `WHERE` on a variable-length relationship (the binding is a relationship
+  list, not a scalar to hoist), inline `WHERE` inside `shortestPath` / quantified
+  paths (the predicate belongs to search / repetition semantics), a `FILTER` item whose
+  predicate does not reference its own binding (core `WITH * WHERE …` filters the whole
+  row, so the item's scope would be lost), Memgraph `wShortest`, `SEARCH`, `LOAD CSV`,
+  admin statements, `WHEN`.
+- The TCK dialect matrix buckets a transpose as a capability skip by issue code rather
+  than by dialect name, so a regression on any target stays a failure instead of hiding
+  in the skip bucket. `CG1201` (unknown variable) and `CG1501` (rewrite failed) are
+  deliberately not excused. Measured after the change: `neo4j5` / `neo4j25` / `memgraph`
+  97% of 569 executable, `puppygraph` 59% of 483 executable with 86 skips.
+
+### Fixed
+
+- `lineage` no longer recurses forever on `WITH n AS n` or alias cycles; the walk
+  stops on a repeated binding name and keeps the last useful expression.
+- `lineage` resolves a binding to the nearest preceding `WITH` definition before the
+  `RETURN`, so a later `WITH` shadows an earlier alias of the same name instead of
+  the first definition winning.
+
 ## [0.1.9] - 2026-08-08
 
 ### Added

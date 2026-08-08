@@ -5,6 +5,7 @@ from __future__ import annotations
 from cypherast import ast as a
 from cypherast.dialects.validate.issues import ConstraintIssue
 from cypherast.schema import (
+    AGGREGATE_FUNCTIONS,
     FUNCTION_OPTIONAL_ARGS,
     FUNCTION_VARIADIC_MIN,
     OC9_EXCLUDED_FUNCTIONS,
@@ -12,20 +13,7 @@ from cypherast.schema import (
 )
 
 # OC9 aggregate names accepted with DISTINCT / * — arity checked loosely
-_AGGREGATES = frozenset(
-    {
-        "count",
-        "sum",
-        "avg",
-        "min",
-        "max",
-        "collect",
-        "percentilecont",
-        "percentiledisc",
-        "stdev",
-        "stdevp",
-    }
-)
+_AGGREGATES = AGGREGATE_FUNCTIONS
 
 
 def _function_signature_issues(tree: a.AstNode) -> list[ConstraintIssue]:

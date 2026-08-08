@@ -79,6 +79,9 @@ class Renderer:
             parts.append("MATCH")
         parts.append(self.dispatch(node.pattern))
         body = " ".join(parts)
+        if node.search:
+            sep = "\n" if self._pretty else " "
+            body += sep + self.dispatch(node.search)
         if node.hints:
             sep = "\n" if self._pretty else " "
             body += sep + sep.join(node.hints)
@@ -96,6 +99,7 @@ class Renderer:
             parts.append("DISTINCT")
         parts.append(self._proj_list(node.expressions))
         body = " ".join(parts)
+        body += self._group_by(node)
         body += self._tail(node)
         if node.where:
             sep = "\n" if self._pretty else " "
@@ -108,8 +112,17 @@ class Renderer:
             parts.append("DISTINCT")
         parts.append(self._proj_list(node.expressions))
         body = " ".join(parts)
+        body += self._group_by(node)
         body += self._tail(node)
         return body
+
+    def _group_by(self, node: a.AstNode) -> str:
+        """GROUP BY sits between the projections and the ORDER BY / SKIP / LIMIT tail."""
+        group_by = getattr(node, "group_by", None)
+        if not group_by:
+            return ""
+        sep = "\n" if self._pretty else " "
+        return sep + self.dispatch(group_by)
 
     def _tail(self, node: a.AstNode) -> str:
         bits: list[str] = []
@@ -129,6 +142,9 @@ class Renderer:
 
     def render_Unwind(self, node: a.Unwind) -> str:
         return f"UNWIND {self.dispatch(node.expression)} AS {self.dispatch(node.alias)}"
+
+    def render_For(self, node: a.For) -> str:
+        return f"FOR {self.dispatch(node.alias)} IN {self.dispatch(node.expression)}"
 
     def render_Order(self, node: a.Order) -> str:
         return "ORDER BY " + ", ".join(self.dispatch(e) for e in node.expressions)
@@ -198,7 +214,68 @@ class Renderer:
         )
 
     def render_CallSubquery(self, node: a.CallSubquery) -> str:
-        return f"CALL {{ {self.dispatch(node.query)} }}"
+        prefix = "OPTIONAL " if node.optional else ""
+        vars_part = ""
+        if node.variables is not None:
+            if isinstance(node.variables, list):
+                vars_part = "(" + ", ".join(self.dispatch(v) for v in node.variables) + ") "
+            elif isinstance(node.variables, a.Star):
+                vars_part = "(*) "
+        body = f"{prefix}CALL {vars_part}{{ {self.dispatch(node.query)} }}"
+        if node.in_transactions:
+            body += " IN TRANSACTIONS"
+            if node.transaction_rows is not None:
+                rows = self.dispatch(node.transaction_rows)
+                body += f" OF {rows} ROWS"
+        return body
+
+    def render_Filter(self, node: a.Filter) -> str:
+        parts = [
+            f"{self.dispatch(item.variable)} WHERE {self.dispatch(item.predicate)}"
+            for item in (node.items or [])
+        ]
+        return "FILTER (" + ", ".join(parts) + ")"
+
+    def render_GroupBy(self, node: a.GroupBy) -> str:
+        return "GROUP BY " + ", ".join(self.dispatch(e) for e in node.expressions)
+
+    def render_Let(self, node: a.Let) -> str:
+        parts: list[str] = []
+        for item in node.items or []:
+            if isinstance(item, a.Alias):
+                parts.append(f"{self.dispatch(item.alias)} = {self.dispatch(item.this)}")
+            else:
+                parts.append(self.dispatch(item))
+        return "LET " + ", ".join(parts)
+
+    def render_LoadCsv(self, node: a.LoadCsv) -> str:
+        hdr = " WITH HEADERS" if node.with_headers else ""
+        body = f"LOAD CSV{hdr} FROM {self.dispatch(node.url)} AS {self.dispatch(node.alias)}"
+        if node.fieldterminator is not None:
+            body += f" FIELDTERMINATOR {self.dispatch(node.fieldterminator)}"
+        return body
+
+    def render_Search(self, node: a.Search) -> str:
+        limit = f" LIMIT {self.dispatch(node.limit)}" if node.limit else ""
+        score = f" SCORE AS {self.dispatch(node.score_alias)}" if node.score_alias else ""
+        return (
+            f"SEARCH {self.dispatch(node.variable)} IN ("
+            f"VECTOR INDEX {self.dispatch(node.index_name)} "
+            f"FOR {self.dispatch(node.vector_expr)}{limit}){score}"
+        )
+
+    def render_WhenBranch(self, node: a.WhenBranch) -> str:
+        cond = self.dispatch(node.condition)
+        return f"WHEN {cond} THEN {{ {self.dispatch(node.query)} }}"
+
+    def render_WhenQuery(self, node: a.WhenQuery) -> str:
+        parts: list[str] = [self.dispatch(branch) for branch in node.branches or []]
+        if node.default:
+            parts.append(f"ELSE {{ {self.dispatch(node.default)} }}")
+        return " ".join(parts)
+
+    def render_AdminStatement(self, node: a.AdminStatement) -> str:
+        return str(node.text)
 
     def render_CallProcedure(self, node: a.CallProcedure) -> str:
         args = ", ".join(self.dispatch(e) for e in (node.expressions or []))
@@ -237,7 +314,15 @@ class Renderer:
             parts.append(self.dispatch(node.labels))
         if node.properties:
             parts.append(self.dispatch(node.properties))
-        return "(" + "".join(parts) + ")"
+        body = "".join(parts)
+        if node.where:
+            body += f" WHERE {self.dispatch(node.where.this)}"
+        return "(" + body + ")"
+
+    def render_RelationshipLambda(self, node: a.RelationshipLambda) -> str:
+        rel = self.dispatch(node.relationship)
+        inner = self.dispatch(node.node)
+        return f"({rel}, {inner} | {self.dispatch(node.expression)})"
 
     def render_LabelExpression(self, node: a.LabelExpression) -> str:
         if node.expression:
@@ -252,18 +337,32 @@ class Renderer:
             inner_parts.append(":" + "|".join(node.types))
         if node.variable_length:
             star = "*"
+            bounds = ""
             if node.min_hops is not None and node.max_hops is not None:
                 if node.min_hops == node.max_hops:
-                    star += str(node.min_hops)
+                    bounds = str(node.min_hops)
                 else:
-                    star += f"{node.min_hops}..{node.max_hops}"
+                    bounds = f"{node.min_hops}..{node.max_hops}"
             elif node.min_hops is not None:
-                star += f"{node.min_hops}.."
+                bounds = f"{node.min_hops}.."
             elif node.max_hops is not None:
-                star += f"..{node.max_hops}"
+                bounds = f"..{node.max_hops}"
+            if node.memgraph_quantifier:
+                # ``*bfs 1..5`` — the quantifier name needs separating from the bounds.
+                star += str(node.memgraph_quantifier)
+                star += f" {bounds}" if bounds else ""
+            else:
+                star += bounds
+            # Memgraph order: quantifier, bounds, lambda, then total-weight binding.
+            if node.memgraph_weight_expr is not None:
+                star += f" {self.dispatch(node.memgraph_weight_expr)}"
+            if node.memgraph_total_weight is not None:
+                star += f" {self.dispatch(node.memgraph_total_weight)}"
             inner_parts.append(star)
         if node.properties:
             inner_parts.append(self.dispatch(node.properties))
+        if node.where:
+            inner_parts.append(f" WHERE {self.dispatch(node.where.this)}")
         detail = "".join(inner_parts)
         bracketed = (
             f"[{detail}]"

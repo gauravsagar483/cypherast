@@ -116,7 +116,12 @@ class TokenKind(Enum):
     FILTER = auto()
     LET = auto()
     FOR = auto()
-    # NULLS / FIRST / LAST are not global keywords (Neo4j); parsed contextually in ORDER BY
+    BANG = auto()  # !
+    AMP = auto()  # &
+    # Clause words Neo4j does not reserve — LOAD, CSV, FROM, HEADERS, FIELDTERMINATOR,
+    # GROUP, OF, TRANSACTIONS, ROWS, SEARCH, VECTOR, SCORE, SHOW, CONSTRAINT, ASSERT,
+    # UNIQUE — stay IDENT and are matched contextually by the parser, like NULLS /
+    # FIRST / LAST in ORDER BY. Reserving them would break `AS rows`, `UNWIND rows`, etc.
 
 
 KEYWORDS: dict[str, TokenKind] = {
@@ -268,6 +273,9 @@ class Lexer:
         if two == "!=":  # Neo4j accepts != as synonym for <>
             self._advance(2)
             return Token(TokenKind.NEQ, "!=", pos, self._take_comments())
+        if ch == "!":
+            self._advance()
+            return Token(TokenKind.BANG, "!", pos, self._take_comments())
 
         single = {
             "(": TokenKind.LPAREN,
@@ -290,6 +298,7 @@ class Lexer:
             "/": TokenKind.SLASH,
             "%": TokenKind.PERCENT,
             "^": TokenKind.CARET,
+            "&": TokenKind.AMP,
         }
         if ch in single:
             self._advance()

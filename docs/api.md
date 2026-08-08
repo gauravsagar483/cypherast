@@ -30,6 +30,16 @@ stmts = cypherast.parse("RETURN 1")
 
 Dialects: `opencypher` / `opencypher9` (openCypher 9 baseline; default), `neo4j`, `memgraph`, `puppygraph`.
 
+### Nesting depth
+
+The parser is recursive descent, so nesting is bounded. `cypherast.parser.MAX_PARSE_DEPTH`
+is `1000` (CPython's default `sys.getrecursionlimit()`), counted over statement,
+expression, and path-pattern nesting; `Parser(source, max_depth=…)` overrides it.
+Overflow raises `ParseError` **CG1105** (`maximum recursion depth exceeded while parsing`)
+with the offending position — a bare `RecursionError` never escapes `parse()`. Because one
+nesting level costs several Python frames, the interpreter stack usually trips first
+(around 140 nested parentheses); both paths report CG1105.
+
 ### Procedure `CALL` vs subquery `CALL`
 
 Two different clause shapes share the `CALL` keyword:
@@ -170,6 +180,57 @@ issues = cypherast.validate(q, dialect="puppygraph", schema=schema)
 
 ---
 
+## Neutral Cypher core (semantic APIs)
+
+`explain`, `profile`, `run`, and `lineage` do not consume dialect surface AST. They
+parse with the requested dialect, then lower once to a **neutral Cypher core** before
+planner / executor / lineage see the tree:
+
+```text
+parse(read=…) → [optional optimize/render for a write target] → lower_to_core → planner · executor · lineage
+```
+
+| API | Source-surface keyword |
+|-----|------------------------|
+| `explain` / `profile` / `run` | `read=` |
+| `lineage` | `from_` (text and AST alike) |
+| `cypherast.executor.execute(tree, …)` | `dialect=` |
+| `cypherast.planner.explain` / `profile` / `plan_query` | `dialect=` |
+
+```python
+from cypherast.dialects.lower import lower_to_core
+from cypherast.executor import execute
+
+tree = cypherast.parse_one("FOR n IN [1, 2] RETURN n", read="neo4j25")
+list(execute(tree, dialect="neo4j25"))  # [{'n': 1}, {'n': 2}]
+
+core = lower_to_core(tree, dialect="neo4j25")  # copy; `tree` is unchanged
+```
+
+Lowering returns a copy, so source trees keep their surface nodes. The keyword only
+names the source surface: lowering is structural and runs even when no dialect is
+given, so the neutral-core guarantee never depends on the caller remembering it
+(lowering already-core AST is idempotent).
+
+Lowered for in-memory use: inline pattern `WHERE` (hoisted into the owning `MATCH` /
+pattern comprehension), `FOR` → `UNWIND`, `FILTER` → `WITH … WHERE`, `LET` → one
+`WITH` per item (sequential scope, so a later item may reference an earlier one),
+redundant `GROUP BY` metadata, Memgraph `*bfs`. `CALL … IN TRANSACTIONS` batching
+metadata is cleared because in-memory execution is single-process.
+
+Rejected with `ExecuteError` (`CG1702`) rather than silently mis-executed:
+
+| Surface | Why |
+|---------|-----|
+| `GROUP BY` keys ≠ the clause's non-aggregate projections | core grouping derives from projections, so clearing the keys would change aggregates |
+| `GROUP BY` with no aggregate projection | grouping collapses duplicate rows; core projection keeps them |
+| `FILTER` item whose predicate ignores its own binding | core `WITH * WHERE …` filters the whole row, losing the item's scope |
+| Inline `WHERE` on a variable-length relationship | the binding is a relationship list, not a scalar to hoist |
+| Inline `WHERE` inside `shortestPath` / quantified path | the predicate belongs to search / repetition semantics |
+| `wShortest`, `SEARCH`, `LOAD CSV`, admin statements, `WHEN` | no core equivalent |
+
+---
+
 ## `explain` / `profile`
 
 ```python
@@ -184,6 +245,9 @@ print(cypherast.profile(
 ```
 
 With `GraphSchema` stats/indexes, cost enumeration picks lower-cost scan anchors.
+
+Pass `read=` to name the source surface, e.g. `explain("MATCH (n:Person WHERE n.age
+> 18) RETURN n", read="neo4j25")` plans a `Filter` over the hoisted predicate.
 
 ---
 
@@ -226,7 +290,18 @@ node = cypherast.lineage(
     binding="nm",
 )
 # node.expression, node.downstream, node.to_html()
+
+# `from_` names the source surface; LET lowers to WITH before provenance walks
+node = cypherast.lineage(
+    "MATCH (n:Person) LET age = n.age RETURN age",
+    binding="age",
+    from_="neo4j25",
+)
 ```
+
+RETURN bindings resolve backwards from the `RETURN`, so a later `WITH` shadows an
+earlier alias of the same name. Repeated names stop the walk, so `WITH n AS n` and
+alias cycles terminate with the last useful expression instead of recursing.
 
 ---
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +77,54 @@ class DialectCapabilities:
     reject_using_hints: bool = False
     check_comparability: bool = False
 
+    # Cypher 25 / Neo4j 25 feature gates (parse + validate)
+    allow_filter_clause: bool = False
+    allow_for_clause: bool = False
+    allow_let_clause: bool = False
+    allow_search_clause: bool = False
+    allow_when_query: bool = False
+    allow_group_by_subclause: bool = False
+    allow_call_variable_import: bool = False
+    allow_call_in_transactions: bool = False
+    allow_optional_call: bool = False
+    allow_inline_pattern_where: bool = False
+    allow_label_expressions: bool = False
+    allow_dynamic_labels: bool = False
+    allow_load_csv: bool = False
+    allow_admin_ddl: bool = False
+    # Memgraph-specific relationship quantifiers (*bfs..N, *wShortest)
+    allow_memgraph_rel_quantifiers: bool = False
+
+
+DEFAULT_CYPHER_CAPABILITIES = DialectCapabilities()
+
+NEO4J5_CAPABILITIES = DialectCapabilities(
+    reject_gql_nodes=True,
+    allow_call_variable_import=True,
+    allow_inline_pattern_where=True,
+    allow_label_expressions=True,
+    allow_load_csv=True,
+)
+
+NEO4J25_CAPABILITIES = replace(
+    NEO4J5_CAPABILITIES,
+    allow_filter_clause=True,
+    allow_for_clause=True,
+    allow_let_clause=True,
+    allow_search_clause=True,
+    allow_when_query=True,
+    allow_group_by_subclause=True,
+    allow_call_in_transactions=True,
+    allow_optional_call=True,
+    allow_dynamic_labels=True,
+)
+
+MEMGRAPH_CAPABILITIES = replace(
+    NEO4J5_CAPABILITIES,
+    reject_quantified_path=True,
+    allow_admin_ddl=True,
+    allow_memgraph_rel_quantifiers=True,
+)
 
 OPENCYPHER9_CAPABILITIES = DialectCapabilities(
     check_undefined_variables=True,

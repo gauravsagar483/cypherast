@@ -14,7 +14,7 @@ alwaysApply: false
 - Parser/hardening: `tests/test_parse.py`, `tests/test_hardening.py`.
 - Procedure `CALL`: `tests/test_call_procedure.py` (`CallProcedure` vs `CallSubquery`).
 - Web dialect transpile: `tests/test_web_dialect_transpile.py` + `tests/fixtures/web_cypher_queries.py`.
-- TCK parse-rate: `tests/tck/` via `make test-tck` — do not treat sample `.feature` files as a full openCypher TCK.
+- TCK: `tests/tck/` — smoke via `make test-tck`; official OC9 via `make test-tck-official`; dialect transpose via `make test-tck-dialects` (`--dialect-matrix`). Do not treat sample `.feature` files as a full openCypher TCK. Always pass dialect=` explicitly in new dialect/TCK tests.
 
 ## Rules
 

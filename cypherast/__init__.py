@@ -165,9 +165,10 @@ def validate(
 
 def explain(cypher: str, schema: object | None = None, read: str | None = None) -> str:
     """Return textual EXPLAIN plan."""
+    from cypherast.dialects.lower import lower_to_core
     from cypherast.planner import explain as _explain
 
-    tree = parse_one(cypher, read=read)
+    tree = lower_to_core(parse_one(cypher, read=read), dialect=read)
     return _explain(tree, schema=schema)
 
 
@@ -179,10 +180,16 @@ def profile(
     read: str | None = None,
 ) -> str:
     """Run with profiling and return plan + row counts."""
+    from cypherast.dialects.lower import lower_to_core
+    from cypherast.executor.graph import Graph
     from cypherast.planner import profile as _profile
 
-    tree = parse_one(cypher, read=read)
-    return _profile(tree, schema=schema, graph=graph)
+    if graph is not None and not isinstance(graph, Graph):
+        raise TypeError("graph must be a cypherast.executor.Graph")
+    g: Graph | None = graph
+    # Lower once at the public seam; planner profile executes core with dialect=None.
+    tree = lower_to_core(parse_one(cypher, read=read), dialect=read)
+    return _profile(tree, schema=schema, graph=g)
 
 
 def run(
@@ -200,7 +207,7 @@ def run(
     g = graph if isinstance(graph, Graph) or graph is None else None
     if graph is not None and not isinstance(graph, Graph):
         raise TypeError("graph must be a cypherast.executor.Graph")
-    return execute(tree, graph=g, schema=schema)
+    return execute(tree, graph=g, schema=schema, dialect=read)
 
 
 def lineage(
@@ -213,7 +220,11 @@ def lineage(
     """Binding-level provenance graph for a Cypher query."""
     # Must not lazy-import ``cypherast.lineage`` inside this function: that
     # rebinds the package attribute to the submodule and breaks later calls.
+    from cypherast.dialects.lower import lower_to_core
+
     tree = cypher if isinstance(cypher, ast.AstNode) else parse_one(cypher, read=from_)
+    # ``from_`` names the source surface for str and AST alike.
+    tree = lower_to_core(tree, dialect=from_)
     return _lineage_impl(tree, binding=binding, schema=schema)
 
 

@@ -402,6 +402,7 @@ class NodePattern(AstNode):
         "variable": False,
         "labels": False,
         "properties": False,
+        "where": False,
     }
 
 
@@ -414,6 +415,10 @@ class RelationshipPattern(AstNode):
         "min_hops": False,
         "max_hops": False,  # None = unbounded when * present
         "variable_length": False,
+        "where": False,
+        "memgraph_quantifier": False,
+        "memgraph_weight_expr": False,
+        "memgraph_total_weight": False,
     }
 
 
@@ -433,6 +438,12 @@ class ShortestPath(AstNode):
     arg_types = {"this": True, "all_": False}
 
 
+class RelationshipLambda(AstNode):
+    """``(rel, node | expr)`` weight or filter lambda on a Memgraph quantifier."""
+
+    arg_types = {"relationship": True, "node": True, "expression": True}
+
+
 class QuantifiedPath(AstNode):
     """Neo4j quantified path pattern (parse-tolerant in v1)."""
 
@@ -445,7 +456,7 @@ class QuantifiedPath(AstNode):
 
 
 class Match(AstNode):
-    arg_types = {"pattern": True, "optional": False, "where": False, "hints": False}
+    arg_types = {"pattern": True, "optional": False, "where": False, "hints": False, "search": False}
 
 
 class Where(AstNode):
@@ -460,6 +471,7 @@ class With(AstNode):
         "order": False,
         "skip": False,
         "limit": False,
+        "group_by": False,
     }
 
 
@@ -470,7 +482,18 @@ class Return(AstNode):
         "order": False,
         "skip": False,
         "limit": False,
+        "group_by": False,
     }
+
+
+class For(AstNode):
+    """``FOR x IN list RETURN …`` (Cypher 25; equivalent to UNWIND)."""
+
+    arg_types = {"expression": True, "alias": True}
+
+
+class GroupBy(AstNode):
+    arg_types = {"expressions": True}
 
 
 class Unwind(AstNode):
@@ -536,9 +559,70 @@ class Foreach(AstNode):
 
 
 class CallSubquery(AstNode):
-    """``CALL { … }`` subquery (parse + render in v1; limited exec)."""
+    """``CALL (vars) { … } [IN TRANSACTIONS …]`` subquery."""
 
-    arg_types = {"query": True, "variables": False}  # optional import vars
+    arg_types = {
+        "query": True,
+        "variables": False,
+        "optional": False,
+        "in_transactions": False,
+        "transaction_rows": False,
+    }
+
+
+class FilterItem(AstNode):
+    arg_types = {"variable": True, "predicate": True}
+
+
+class Filter(AstNode):
+    arg_types = {"items": True}  # list[FilterItem]
+
+
+class Let(AstNode):
+    arg_types = {"items": True}  # list[Alias]
+
+
+class LoadCsv(AstNode):
+    arg_types = {
+        "url": True,
+        "alias": True,
+        "with_headers": False,
+        "fieldterminator": False,
+    }
+
+
+class Search(AstNode):
+    """``SEARCH var IN (VECTOR INDEX …)`` on MATCH (neo4j25)."""
+
+    arg_types = {
+        "variable": True,
+        "index_name": True,
+        "vector_expr": True,
+        "limit": False,
+        "score_alias": False,
+    }
+
+
+class WhenBranch(AstNode):
+    """One ``WHEN cond THEN { query }`` arm of a composed query."""
+
+    arg_types = {"condition": True, "query": True}
+
+
+class WhenQuery(AstNode):
+    """``WHEN cond THEN { query } … [ELSE { query }]`` composed query.
+
+    Branches are ``WhenBranch`` nodes rather than tuples so ``walk`` / ``find`` /
+    ``transform`` reach the conditions and branch bodies.
+    """
+
+    arg_types = {"branches": True, "default": False}
+
+
+class AdminStatement(AstNode):
+    """CREATE INDEX / CONSTRAINT / SHOW … (admin lane)."""
+
+    arg_types = {"text": True}
 
 
 class CallProcedure(AstNode):

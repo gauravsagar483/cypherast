@@ -12,6 +12,7 @@ from cypherast.dialects.validate.aggregates import (
 from cypherast.dialects.validate.cartesian import _cartesian_matches
 from cypherast.dialects.validate.case_arms import _mismatched_case_arms
 from cypherast.dialects.validate.comparability import comparability_issues
+from cypherast.dialects.validate.cypher25 import _reject_cypher25_only
 from cypherast.dialects.validate.exists_fn import _exists_function_calls
 from cypherast.dialects.validate.functions import _function_signature_issues
 from cypherast.dialects.validate.id_predicates import _id_in_string_predicates
@@ -134,6 +135,7 @@ def validate_capabilities(
         issues.extend(_function_signature_issues(tree))
     if caps.check_comparability:
         issues.extend(comparability_issues(tree))
+    issues.extend(_reject_cypher25_only(tree, caps))
     gs = ensure_schema(schema)
     if gs is not None:
         issues.extend(_schema_unknown_types(tree, gs))
@@ -174,6 +176,8 @@ def raise_if_invalid(
         "CG1510",
         "CG1511",
         "CG1512",
+        "CG1520",
+        "CG1521",
     }
     raise ValidationError(
         first.message,

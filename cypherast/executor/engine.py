@@ -9,6 +9,7 @@ from cypherast import ast as a
 from cypherast.errors import ExecuteError
 from cypherast.executor.env import NULL, Env, cypher_true, eval_expr, is_null
 from cypherast.executor.graph import Graph, Node, Relationship
+from cypherast.schema import AGGREGATE_FUNCTIONS
 
 
 @dataclass
@@ -34,10 +35,15 @@ def execute(
     graph: Graph | None = None,
     schema: object | None = None,
     params: dict[str, t.Any] | None = None,
+    *,
+    dialect: str | None = None,
 ) -> Result:
+    from cypherast.dialects.lower import lower_to_core
+
     g = graph or Graph()
-    query = tree.this if isinstance(tree, a.Cypher) else tree
-    engine = Engine(g, params or {})
+    core = lower_to_core(tree, dialect=dialect)
+    query = core.this if isinstance(core, a.Cypher) else core
+    engine = Engine(g, params or {}, dialect=dialect)
     if isinstance(query, a.Union):
         return engine.run_union(query)
     if isinstance(query, a.Query):
@@ -46,20 +52,37 @@ def execute(
 
 
 class Engine:
-    def __init__(self, graph: Graph, params: dict[str, t.Any]) -> None:
+    def __init__(
+        self,
+        graph: Graph,
+        params: dict[str, t.Any],
+        *,
+        dialect: str | None = None,
+    ) -> None:
         self.graph = graph
         self.params = params
+        self.dialect = dialect
 
     def run_union(self, node: a.Union) -> Result:
         left = (
             self.run_query(node.this)
             if isinstance(node.this, a.Query)
-            else execute(a.Cypher(this=node.this), self.graph, params=self.params)
+            else execute(
+                a.Cypher(this=node.this),
+                self.graph,
+                params=self.params,
+                dialect=self.dialect,
+            )
         )
         right = (
             self.run_query(node.expression)
             if isinstance(node.expression, a.Query)
-            else execute(a.Cypher(this=node.expression), self.graph, params=self.params)
+            else execute(
+                a.Cypher(this=node.expression),
+                self.graph,
+                params=self.params,
+                dialect=self.dialect,
+            )
         )
         rows = list(left.rows) + list(right.rows)
         if node.distinct:
@@ -765,18 +788,7 @@ def _proj_name(expr: a.AstNode) -> str:
 def _is_agg(expr: a.AstNode) -> bool:
     node = expr.this if isinstance(expr, a.Alias) else expr
     if isinstance(node, a.FunctionCall):
-        return node.name.lower() in {
-            "count",
-            "sum",
-            "avg",
-            "min",
-            "max",
-            "collect",
-            "stdev",
-            "stdevp",
-            "percentilecont",
-            "percentiledisc",
-        }
+        return node.name.lower() in AGGREGATE_FUNCTIONS
     return False
 
 
