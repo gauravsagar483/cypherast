@@ -1,7 +1,7 @@
 # cypherast — agent instructions
 
 Cypher/GQL library: dialect parse → optional target optimize/render → source-dialect `lower_to_core` → neutral Cypher core → planner / in-memory executor / lineage.
-Zero runtime deps. Python **3.11+**. Package version **0.1.9** (`pyproject.toml`). MIT.
+Zero runtime deps. Python **3.11+**. Package version **0.1.10** (`pyproject.toml`). MIT.
 
 Canonical AI instructions live here. Topic rules live under `.agents/rules/` only (no tool-specific stub/rule trees in-repo).
 

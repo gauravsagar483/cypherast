@@ -216,7 +216,7 @@ Recent scores (runnable scenarios exclude Cucumber Scenario Outline placeholders
 
 ## Status
 
-v0.1.9 — openCypher 9 validation (CG1501–CG1512); official TCK runner (~95% parse); multidialect regression; PuppyGraph bound var-length rels.
+v0.1.10 — versioned Neo4j dialects (`neo4j25` / `neo4j5`); capability-gated Cypher 25 and Memgraph surface; neutral Cypher core lowering before plan / execute / lineage; TCK dialect transpose matrix.
 
 ## CI
 
