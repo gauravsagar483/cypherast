@@ -39,5 +39,4 @@ secrets/
 
 # Local / private (not for public release)
 scripts/puppy_schema_to_cypherast.py
-scripts/fixtures/metagraph_main_schema.json
 scripts/fixtures/

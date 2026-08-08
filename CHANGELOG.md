@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ``cypherast.lineage`` no longer overwritten by the ``lineage`` submodule on first
   call (lazy import rebound the package attribute to the module).
 - PuppyGraph: allow bound variable-length relationships (``-[r*1..n]->``) — exempt
-  from OC9 CG1504 for Metagraph lineage / blast-radius queries.
+  from OC9 CG1504 for engine queries that bind path segments.
 
 ### Changed
 
@@ -113,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Bound reuse in OPTIONAL/MATCH: do not copy sibling/neighbor labels onto already-bound vars (e.g. `(dl:DataLakeTables) … OPTIONAL MATCH (dl)-[:HAS_DQ_CHECK]->(dq:…)` no longer becomes `(dl:DataQualityCheck)`).
+- Bound reuse in OPTIONAL/MATCH: do not copy sibling/neighbor labels onto already-bound vars (e.g. `(cat:Catalog) … OPTIONAL MATCH (cat)-[:HAS_CHECK]->(chk:…)` no longer becomes `(cat:Check)`).
 - Release gate: ruff B023 in UNION branch collect; mypy annotations on constraint helpers.
 
 ## [0.1.2] - 2026-08-07

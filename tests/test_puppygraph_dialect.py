@@ -258,20 +258,20 @@ def test_optimize_labels_anonymous_end_from_neighbor():
 
 
 def test_optimize_prior_bound_label_not_neighbor_copy():
-    """Reuse site (dl) must keep DataLakeTables — not copy DataQualityCheck from end."""
+    """Reuse site (cat) must keep Catalog — not copy Check from end."""
     q = (
-        "MATCH (dl:DataLakeTables) "
-        "OPTIONAL MATCH (dl)-[:HAS_DQ_CHECK]->(dq:DataQualityCheck) "
-        "RETURN CASE WHEN dq IS NULL THEN NULL ELSE "
-        "replace(split(toString(id(dq)), '[')[1], ']', '') END AS dq_check_vertex_id"
+        "MATCH (cat:Catalog) "
+        "OPTIONAL MATCH (cat)-[:HAS_CHECK]->(chk:Check) "
+        "RETURN CASE WHEN chk IS NULL THEN NULL ELSE "
+        "replace(split(toString(id(chk)), '[')[1], ']', '') END AS check_vertex_id"
     )
     opt = cypherast.optimize(q, write="puppygraph")
     out = opt.cypher(dialect="puppygraph")
-    assert "dl:DataQualityCheck" not in out.replace(" ", "")
-    assert "DataLakeTables" in out
-    assert "DataQualityCheck" in out
-    # OPTIONAL reuse of dl should carry prior label (or stay bare — never wrong label)
-    assert "(dl:DataLakeTables)" in out.replace(" ", "") or "(dl)-" in out.replace(" ", "")
+    assert "cat:Check" not in out.replace(" ", "")
+    assert "Catalog" in out
+    assert "Check" in out
+    # OPTIONAL reuse of cat should carry prior label (or stay bare — never wrong label)
+    assert "(cat:Catalog)" in out.replace(" ", "") or "(cat)-" in out.replace(" ", "")
     assert not any(i.code == "CG1402" for i in cypherast.validate(opt, dialect="puppygraph"))
 
 
@@ -431,10 +431,10 @@ def test_harness_reject_apt18_et06_union_id_scope_varlen():
         "UNION",
     )
 
-    idc = soft_issues("MATCH (m:Metric) WHERE id(m) CONTAINS 'air_sa' RETURN m.name LIMIT 20")
+    idc = soft_issues("MATCH (m:Metric) WHERE id(m) CONTAINS 'vertex' RETURN m.name LIMIT 20")
     assert any("id()" in i.message or "elementId" in i.message for i in idc)
     must_raise(
-        "MATCH (m:Metric) WHERE id(m) CONTAINS 'air_sa' RETURN m.name LIMIT 20",
+        "MATCH (m:Metric) WHERE id(m) CONTAINS 'vertex' RETURN m.name LIMIT 20",
         "id()",
         "elementId",
     )
@@ -582,8 +582,8 @@ def test_not_double_paren_pattern_predicate():
 def test_fet45_optimize_adds_null_guard():
     """FET-45: optimize wraps OPTIONAL id()/split use in CASE WHEN … IS NULL."""
     q = (
-        "MATCH (m:Metric) OPTIONAL MATCH (dl:DataLakeTables)-[:HAS_SOURCE_TABLE]->(st:EgmpSourceTable) "
-        "RETURN replace(split(toString(id(dl)), '[')[1], ']', '') AS table LIMIT 20"
+        "MATCH (m:Metric) OPTIONAL MATCH (cat:Catalog)-[:HAS_SOURCE]->(st:SourceTable) "
+        "RETURN replace(split(toString(id(cat)), '[')[1], ']', '') AS table LIMIT 20"
     )
     assert any(
         "OPTIONAL-bound" in i.message
@@ -592,7 +592,7 @@ def test_fet45_optimize_adds_null_guard():
     opt = cypherast.optimize(q, write="puppygraph")
     out = opt.cypher(dialect="puppygraph")
     assert "CASE WHEN" in out.upper()
-    assert "dl IS NULL" in out.replace("  ", " ")
+    assert "cat IS NULL" in out.replace("  ", " ")
     assert "AS table" in out
     assert not any(
         "OPTIONAL-bound" in i.message

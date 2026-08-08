@@ -44,7 +44,7 @@ class PuppyGraph(OpenCypher):
         max_var_length_hops=None,
         allow_unbounded_var_length=True,
         rewrite_var_length_bounds=False,
-        # PuppyGraph allows bound var-length rels (Metagraph lineage / blast-radius).
+        # PuppyGraph allows bound var-length rels (OC9 CG1504 does not).
         reject_var_length_binding=False,
         allow_list_comprehension=False,
         allow_pattern_comprehension=True,
