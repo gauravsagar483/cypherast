@@ -6,11 +6,16 @@ from cypherast import ast as a
 from cypherast.dialects.validate.issues import ConstraintIssue
 
 
-def _id_in_string_predicates(tree: a.AstNode) -> list[ConstraintIssue]:
+def _id_in_string_predicates(
+    tree: a.AstNode, *, denied_functions: frozenset[str]
+) -> list[ConstraintIssue]:
     """Bare id()/elementId() compared as a string (CONTAINS / STARTS/ENDS / = / <>)."""
 
     def _is_id_call(n: a.AstNode | None) -> bool:
-        return isinstance(n, a.FunctionCall) and str(n.name).lower() in {"id", "elementid"}
+        return (
+            isinstance(n, a.FunctionCall)
+            and str(n.name).lower() in denied_functions
+        )
 
     def _is_string_lit(n: a.AstNode | None) -> bool:
         return isinstance(n, a.String) or (
@@ -23,7 +28,7 @@ def _id_in_string_predicates(tree: a.AstNode) -> list[ConstraintIssue]:
             return [
                 ConstraintIssue(
                     "CG1401",
-                    "id()/elementId() is not a string; wrap with toString(...) for text predicates",
+                    "id() is not a string; wrap it with toString(...)",
                     hint="WHERE toString(id(m)) CONTAINS '…' or match a schema string property",
                 )
             ]
@@ -33,7 +38,7 @@ def _id_in_string_predicates(tree: a.AstNode) -> list[ConstraintIssue]:
             return [
                 ConstraintIssue(
                     "CG1401",
-                    "id()/elementId() cannot equal a string key; use toString(id(n)) or a property",
+                    "id() cannot equal a string key without conversion",
                     hint="WHERE toString(id(n)) = '…' or n.key = '…'",
                 )
             ]
@@ -41,7 +46,7 @@ def _id_in_string_predicates(tree: a.AstNode) -> list[ConstraintIssue]:
             return [
                 ConstraintIssue(
                     "CG1401",
-                    "id()/elementId() cannot equal a string key; use toString(id(n)) or a property",
+                    "id() cannot equal a string key without conversion",
                     hint="WHERE toString(id(n)) = '…' or n.key = '…'",
                 )
             ]

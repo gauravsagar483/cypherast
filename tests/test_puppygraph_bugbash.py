@@ -52,7 +52,7 @@ def test_bb02_label_or_roundtrips():
 
 
 def test_bb19_no_wrong_neighbor_label_without_schema():
-    """Unknown rel: residual :_Node — never invent Software on the other end."""
+    """Unknown rel: keep endpoint bare; never invent any label."""
     out = cypherast.optimize(
         "MATCH (a:Software)-[:CREATED_BY]->(b) RETURN a,b",
         write="puppygraph",
@@ -60,11 +60,12 @@ def test_bb19_no_wrong_neighbor_label_without_schema():
         strict=True,
     ).cypher(dialect="puppygraph")
     compact = out.replace(" ", "")
-    assert "b:_Node" in compact or ":_Node" in compact
+    assert "(b)" in compact
+    assert "_Node" not in compact
     assert "b:Software" not in compact
 
 
-def test_bb19_homogeneous_with_schema_still_labels():
+def test_bb19_homogeneous_schema_does_not_force_label():
     gs = GraphSchema()
     gs.add_label("Metric")
     gs.add_rel("DERIVED_FROM", "Metric", "Metric")
@@ -73,7 +74,7 @@ def test_bb19_homogeneous_with_schema_still_labels():
         write="puppygraph",
         schema=gs,
     ).cypher(dialect="puppygraph")
-    assert "b:Metric" in out.replace(" ", "") or "(b:Metric)" in out.replace(" ", "")
+    assert "(b)" in out.replace(" ", "")
 
 
 # --- cartesian --------------------------------------------------------------
@@ -87,13 +88,12 @@ def test_bb06_connected_multipath_ok():
     assert "KNOWS" in out.upper() or "knows" in out.lower()
 
 
-def test_bb07_consecutive_disjoint_match_rejected():
-    with pytest.raises(ValidationError) as ei:
-        cypherast.optimize(
-            "MATCH (a:Person) MATCH (b:Software) RETURN a,b",
-            write="puppygraph",
-        )
-    assert "Cartesian" in str(ei.value) or ei.value.code == "CG1401"
+def test_bb07_consecutive_disjoint_match_supported():
+    out = cypherast.optimize(
+        "MATCH (a:Person) MATCH (b:Software) RETURN a,b",
+        write="puppygraph",
+    ).cypher(dialect="puppygraph")
+    assert out.upper().count("MATCH") == 2
 
 
 def test_bb07_consecutive_shared_match_ok():
@@ -129,7 +129,7 @@ def test_bb10_list_concat_in_where():
         'MATCH (n:Person) WHERE n.name IN ["a"] + ["b"] RETURN n',
         dialect="puppygraph",
     )
-    assert any("List concatenation" in i.message for i in issues)
+    assert not any("List concatenation" in i.message for i in issues)
 
 
 def test_bb10_list_concat_in_unwind():
@@ -137,17 +137,16 @@ def test_bb10_list_concat_in_unwind():
         "UNWIND [1] + [2] AS x RETURN x",
         dialect="puppygraph",
     )
-    assert any("List concatenation" in i.message for i in issues)
+    assert not any("List concatenation" in i.message for i in issues)
 
 
-def test_bb11_null_plus_list_not_greenwashed():
-    with pytest.raises(ValidationError) as ei:
-        cypherast.optimize(
-            "RETURN null + [1] AS x",
-            write="puppygraph",
-            strict=True,
-        )
-    assert "List concatenation" in str(ei.value) or ei.value.code == "CG1401"
+def test_bb11_null_plus_list_can_be_simplified():
+    out = cypherast.optimize(
+        "RETURN null + [1] AS x",
+        write="puppygraph",
+        strict=True,
+    ).cypher(dialect="puppygraph")
+    assert "null" in out.lower()
 
 
 # --- FET-45 -----------------------------------------------------------------

@@ -32,10 +32,15 @@ class DialectCapabilities:
     allow_exists_function: bool = True
     allow_list_comprehension: bool = True
     allow_pattern_comprehension: bool = True
+    allow_map_projection: bool = True
+    allow_exists_subquery: bool = True
+    allow_count_subquery: bool = True
     allow_list_concat: bool = True
     allow_node_in_list_membership: bool = True
+    allow_parameters: bool = True
     # id()/elementId() used with CONTAINS / STARTS WITH / ENDS WITH / = string
     allow_id_in_string_predicates: bool = True
+    allow_element_id_in_string_predicates: bool = True
     # OPTIONAL-bound vars in id()/split/… without null guard (FET-45).
     # When False, validate rejects; set rewrite_unguarded_optional_scalar_use
     # to wrap with CASE WHEN var IS NULL THEN NULL ELSE … END.
@@ -47,6 +52,11 @@ class DialectCapabilities:
     # PuppyGraph ET-16/ET-17: CASE THEN/ELSE arms must share a compatible shape.
     # When False, reject list↔list-literal, list↔map, list↔scalar, map↔scalar.
     allow_mismatched_case_arms: bool = True
+    # Function policy overlays. Names are lowercase. Arity triples are
+    # ``(name, min_args, max_args)`` and override the shared catalog.
+    allowed_functions: frozenset[str] = frozenset()
+    unsupported_functions: frozenset[str] = frozenset()
+    function_arity_overrides: tuple[tuple[str, int, int], ...] = ()
 
     # Aggregation / projection
     max_collect_distinct_per_clause: int | None = None  # None = unlimited
@@ -57,11 +67,19 @@ class DialectCapabilities:
     allow_distinct_with_aggregate: bool = True
     # When False, do not silently drop DISTINCT beside aggregates (reject via validate)
     rewrite_distinct_beside_aggregate: bool = True
+    # When False, a projection item may not combine an aggregate with a bare
+    # reference (``RETURN n.age + count(*)``); grouping keys must be standalone.
+    # PuppyGraph's AggregationMixingCheck is stricter than Neo4j here (Neo4j
+    # accepts an exact standalone grouping key inside the aggregate expression),
+    # so only PuppyGraph sets this off.
+    allow_mixed_aggregate_projection: bool = True
     allow_nulls_order_modifiers: bool = True
+    allow_multi_label_nodes: bool = True
 
     # Result shaping
     require_matching_union_columns: bool = False
     check_undefined_variables: bool = False
+    allow_write_clauses: bool = True
 
     # Pattern predicates in WHERE
     pattern_predicate_introduces_bindings: bool = True  # openCypher may; some engines forbid

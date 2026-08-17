@@ -1,6 +1,6 @@
 [project]
 name = "cypherast"
-version = "0.1.10"
+version = "0.1.11"
 description = "Cypher/GQL transpiler, rewriter, planner, and in-memory executor"
 readme = "README.md"
 license = "MIT"
@@ -87,4 +87,5 @@ dev = [
   "ruff>=0.9",
   "mypy>=1.14",
   "pre-commit>=4.0",
+  "gherkin-official>=42.0.1",
 ]

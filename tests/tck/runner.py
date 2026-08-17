@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from gherkin.parser import Parser as GherkinParser
+from gherkin.pickles.compiler import Compiler as GherkinCompiler
+
 from cypherast import parse_one, translate, validate
 from cypherast.errors import CompatibilityError, CypherastError, ValidationError
 from cypherast.executor.engine import execute
@@ -383,6 +386,57 @@ def _outline_skip_reason(body: str) -> str | None:
     return None
 
 
+def _run_expanded_parse_feature(
+    feature: Path,
+    rel: str,
+    *,
+    dialect: str,
+    oc9_filter: bool,
+) -> list[ScenarioResult]:
+    """Parse every compiled Gherkin scenario, including each outline example row."""
+    document = GherkinParser().parse(feature.read_text(encoding="utf-8"))
+    document["uri"] = str(feature)
+    results: list[ScenarioResult] = []
+    for scenario in GherkinCompiler().compile(document):
+        name = str(scenario["name"])
+        steps = scenario.get("steps", [])
+        query = ""
+        compile_error = False
+        for step in steps:
+            if step.get("type") == "Action":
+                argument = step.get("argument") or {}
+                query = str(argument.get("docString", {}).get("content", "")).strip()
+                if query:
+                    break
+        for step in steps:
+            if step.get("type") == "Outcome" and "should be raised at compile time" in str(
+                step.get("text", "")
+            ):
+                compile_error = True
+                break
+        skip = _should_skip_scenario(name, query, oc9_filter=oc9_filter)
+        if skip:
+            results.append(ScenarioResult(name, rel, True, kind="skip", skip_reason=skip))
+            continue
+        if not query:
+            results.append(ScenarioResult(name, rel, False, "no query found", kind="parse"))
+            continue
+        error = _try_parse(query, dialect=dialect)
+        results.append(
+            ScenarioResult(
+                name,
+                rel,
+                passed=error is None or compile_error,
+                error=None if error is None or compile_error else error,
+                kind="parse",
+                skip_reason=(
+                    "expected compile-time rejection" if error is not None and compile_error else None
+                ),
+            )
+        )
+    return results
+
+
 def run_tck(
     root: Path | None = None,
     *,
@@ -400,21 +454,22 @@ def run_tck(
             rel = str(feature.relative_to(root)) if root else feature.name
         except ValueError:
             rel = feature.name
+        if parse_only:
+            board.results.extend(
+                _run_expanded_parse_feature(
+                    feature,
+                    rel,
+                    dialect=read,
+                    oc9_filter=oc9_filter,
+                )
+            )
+            continue
         background = _extract_background(text)
         for name, body in _split_scenarios(text):
             full_body = f"{background}{body}" if background else body
             skip = _should_skip_scenario(name, full_body, oc9_filter=oc9_filter)
             if skip:
                 board.results.append(ScenarioResult(name, rel, True, kind="skip", skip_reason=skip))
-                continue
-            if parse_only:
-                outline = _outline_skip_reason(full_body)
-                if outline:
-                    board.results.append(
-                        ScenarioResult(name, rel, True, kind="skip", skip_reason=outline)
-                    )
-                    continue
-                board.results.append(_run_parse(name, rel, full_body, dialect=read))
                 continue
             unsupported = _run_skip_reason(name, full_body, _extract_query(full_body), dialect=read)
             if unsupported:

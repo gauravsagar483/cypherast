@@ -7,7 +7,7 @@ from cypherast.dialects.validate.issues import ConstraintIssue
 
 
 def _bad_var_length(
-    tree: a.AstNode, *, max_hops: int, allow_unbounded: bool
+    tree: a.AstNode, *, max_hops: int | None, allow_unbounded: bool
 ) -> list[ConstraintIssue]:
     issues: list[ConstraintIssue] = []
     for n in tree.find_all(a.RelationshipPattern):
@@ -19,11 +19,19 @@ def _bad_var_length(
                 ConstraintIssue(
                     "CG1401",
                     "Unbounded variable-length paths are not allowed",
-                    hint=f"Use a bounded form *0..{max_hops} (max {max_hops} hops)",
+                    hint=(
+                        f"Use a bounded form *0..{max_hops} (max {max_hops} hops)"
+                        if max_hops is not None
+                        else "Use an explicit upper bound such as *0..5"
+                    ),
                 )
             )
             break
-        if n.max_hops is not None and int(n.max_hops) > max_hops:
+        if (
+            max_hops is not None
+            and n.max_hops is not None
+            and int(n.max_hops) > max_hops
+        ):
             issues.append(
                 ConstraintIssue(
                     "CG1401",

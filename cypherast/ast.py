@@ -334,6 +334,10 @@ class Contains(Binary):
     pass
 
 
+class RegexMatch(Binary):
+    """openCypher regular-expression predicate: ``value =~ pattern``."""
+
+
 class Unary(AstNode):
     arg_types = {"this": True}
 
@@ -372,6 +376,19 @@ class Quantifier(AstNode):
     arg_types = {"name": True, "variable": True, "source": True, "where": False}
 
 
+class ListLambda(AstNode):
+    """Legacy ``filter``/``extract`` and ``reduce`` list expressions."""
+
+    arg_types = {
+        "name": True,
+        "variable": True,
+        "source": True,
+        "expression": True,
+        "accumulator": False,
+        "initial": False,
+    }
+
+
 class PatternComprehension(AstNode):
     arg_types = {"variable": False, "pattern": True, "where": False, "projection": True}
 
@@ -384,6 +401,12 @@ class PatternPredicate(AstNode):
     """``EXISTS`` / ``NOT`` pattern form in WHERE: ``(n)-->(m)`` as a predicate."""
 
     arg_types = {"pattern": True, "not_": False}
+
+
+class CountSubquery(AstNode):
+    """COUNT subquery expression: ``COUNT { pattern-or-query }``."""
+
+    arg_types = {"query": True}
 
 
 # ---------------------------------------------------------------------------

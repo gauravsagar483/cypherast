@@ -171,13 +171,15 @@ make translate Q="MATCH (n:Person) RETURN n" FROM=opencypher TO=puppygraph OPT=1
 
 ## Dialects
 
-`opencypher` · `neo4j25` (`neo4j`/`neo`) · `neo4j5` (`cypher5`) · `memgraph` · `puppygraph` (read+write). Gremlin/GQL generators = v1.x.
+`opencypher` · `neo4j25` (`neo4j`/`neo`) · `neo4j5` (`cypher5`) · `memgraph` · `puppygraph` (read-only target). Gremlin/GQL generators = v1.x.
 
 openCypher 9 spec: [openCypher9.pdf](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
 
 `puppygraph` subclasses openCypher and applies engine capability constraints on optimize/translate
-(labelled MATCH, no Cartesian multi-path MATCH, strip `NULLS FIRST/LAST`, FET-45 null CASE, etc.).
-Does **not** inject `LIMIT` or enforce hop caps (leave those to the engine / query_guard).
+(reject writes, unbounded variable-length patterns, map/pattern projections and subquery
+expressions; strip `NULLS FIRST/LAST`; apply FET-45 null CASE guards). Unlabelled,
+undirected, and Cartesian MATCH are accepted. Bounded hop limits remain an engine /
+query-guard concern. Does **not** inject `LIMIT`.
 
 Procedure `CALL ns.proc(…) [YIELD …]` parses and renders for all dialects (including PuppyGraph
 `algo.*`). Optimize leaves procedure calls as pass-through; run algorithms on the engine, not
@@ -202,17 +204,24 @@ make test-tck-dialects        # transpose OC9-passing runs → neo4j5/neo4j25/me
 
 Override feature path: `CYPHERAST_TCK_PATH=/path/to/tck/features`. Dialect matrix report: `tests/tck/results-dialects.md`.
 
-Recent scores (runnable scenarios exclude Cucumber Scenario Outline placeholders):
+Parse coverage expands Cucumber Scenario Outlines with `gherkin-official`; execution scores
+continue to use the runner's executable subset.
 
 | Gate | Rate |
 |------|------|
-| Parse (1,339 real queries) | ~95% |
-| Run (executable only) | ~62% |
+| Parse (3,897 expanded scenarios) | 100% |
+| Run (executable only) | ~64% |
 | Effective run (+ expected errors) | ~65% |
 | Dialect transpose (`neo4j5`/`neo4j25`/`memgraph`) | ~97% of OC9-passing |
 | Dialect transpose (`puppygraph`, executable) | ~59% (capability skips excluded) |
 
-**Run rate notes:** The runner skips outlines, side-effect checks, unparseable queries, and procedure stubs. Scenarios that expect compile/runtime errors count as passes when cypherast rejects the query (`expected` bucket).
+**Run rate notes:** The executor runner skips outlines, side-effect checks, unparseable queries,
+and procedure stubs. Parse-only coverage expands outlines and accepts a parser rejection for
+compile-time-error scenarios. Scenarios that expect compile/runtime errors count as passes when
+cypherast rejects the query (`expected` bucket). These targets are scoreboards, not gates: they
+exit non-zero while any non-skipped scenario still fails, so read the printed rates rather than
+the exit status. `make test-tck-dialects` is the gated one (it fails only below the per-dialect
+floors).
 
 ## Status
 

@@ -40,6 +40,7 @@ class TokenKind(Enum):
     GT = auto()  # >
     LTE = auto()  # <=
     GTE = auto()  # >=
+    REGEX = auto()  # =~
     PLUS = auto()  # +
     MINUS = auto()  # -
     STAR = auto()  # *
@@ -261,6 +262,9 @@ class Lexer:
         if two == ">=":
             self._advance(2)
             return Token(TokenKind.GTE, ">=", pos, self._take_comments())
+        if two == "=~":
+            self._advance(2)
+            return Token(TokenKind.REGEX, "=~", pos, self._take_comments())
         if two == "<-":
             self._advance(2)
             return Token(TokenKind.ARROW_LEFT, "<-", pos, self._take_comments())
@@ -348,6 +352,30 @@ class Lexer:
 
     def _number(self, pos: Position) -> Token:
         start = self._i
+        if self._peek() == "0" and self._peek(1).lower() in ("x", "o"):
+            prefix = self._peek(1).lower()
+            valid = "0123456789abcdefABCDEF" if prefix == "x" else "01234567"
+            self._advance(2)
+            digits_start = self._i
+            while not self._eof() and self._peek() in valid:
+                self._advance()
+            if self._i == digits_start or (
+                not self._eof() and (self._peek().isalnum() or self._peek() == "_")
+            ):
+                while not self._eof() and (self._peek().isalnum() or self._peek() == "_"):
+                    self._advance()
+                raise TokenizeError(
+                    "Invalid hexadecimal literal" if prefix == "x" else "Invalid octal literal",
+                    code="CG1004",
+                    position=pos,
+                    source=self.source,
+                )
+            return Token(
+                TokenKind.INTEGER,
+                self.source[start : self._i],
+                pos,
+                self._take_comments(),
+            )
         is_float = False
         while not self._eof() and self._peek().isdigit():
             self._advance()

@@ -185,7 +185,7 @@ FUNCTION_SIGNATURES: dict[str, tuple[list[str], str]] = {
     "head": (["list"], "any"),
     "last": (["list"], "any"),
     "tail": (["list"], "list"),
-    "range": (["integer", "integer"], "list"),
+    "range": (["integer", "integer", "integer"], "list"),
     "toString": (["any"], "string"),
     "toInteger": (["any"], "integer"),
     "toFloat": (["any"], "float"),
@@ -230,6 +230,34 @@ FUNCTION_SIGNATURES: dict[str, tuple[list[str], str]] = {
     "endNode": (["path"], "node"),
     "shortestPath": (["pattern"], "path"),
     "allShortestPaths": (["pattern"], "list"),
+    "exists": (["any"], "boolean"),
+    # Temporal constructors and functions. Availability remains dialect policy.
+    "date": (["any"], "date"),
+    "datetime": (["any"], "datetime"),
+    "localdatetime": (["any"], "localdatetime"),
+    "time": (["any"], "time"),
+    "localtime": (["any"], "localtime"),
+    "duration": (["any"], "duration"),
+    "duration.between": (["any", "any"], "duration"),
+    "duration.inDays": (["any", "any"], "duration"),
+    "date.truncate": (["string", "date"], "date"),
+    # Common engine scalar extensions. Dialects deny unsupported names.
+    "toStringOrNull": (["any"], "string"),
+    "toIntegerOrNull": (["any"], "integer"),
+    "toFloatOrNull": (["any"], "float"),
+    "toBooleanOrNull": (["any"], "boolean"),
+    "toStringList": (["list"], "list"),
+    "isEmpty": (["any"], "boolean"),
+    "char_length": (["string"], "integer"),
+    "character_length": (["string"], "integer"),
+    "randomUUID": ([], "string"),
+    "valueType": (["any"], "string"),
+    "isNaN": (["number"], "boolean"),
+    "nullIf": (["any", "any"], "any"),
+    "normalize": (["string"], "string"),
+    "point": (["map"], "point"),
+    "distance": (["point", "point"], "float"),
+    "haversin": (["number"], "float"),
 }
 
 # Alternate names → canonical registry key (lowercase keys)
@@ -241,7 +269,15 @@ FUNCTION_ALIASES: dict[str, str] = {
 
 # Variadic / optional-argument helpers for validation
 FUNCTION_VARIADIC_MIN: dict[str, int] = {"coalesce": 1}
-FUNCTION_OPTIONAL_ARGS: dict[str, int] = {"substring": 1, "range": 1}
+FUNCTION_OPTIONAL_ARGS: dict[str, int] = {
+    "substring": 1,
+    "range": 1,
+    "date": 1,
+    "datetime": 1,
+    "localdatetime": 1,
+    "time": 1,
+    "localtime": 1,
+}
 
 # Aggregate function names (lowercase). One catalog shared by the executor,
 # dialect aggregate validation, and neutral-core lowering.

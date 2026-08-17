@@ -326,7 +326,13 @@ class Parser:
 
     def parse_set_target(self) -> a.AstNode:
         """SET LHS: property / variable / labels — must not consume ``=`` as comparison."""
-        node = self.parse_postfix()
+        if self._match(TokenKind.LPAREN):
+            node = self.parse_expression()
+            self._expect(TokenKind.RPAREN)
+            while self._match(TokenKind.DOT):
+                node = a.Property(this=node, name=self._parse_unquoted_name())
+        else:
+            node = self.parse_postfix()
         if isinstance(node, a.LabelPredicate) and isinstance(node.this, a.Identifier):
             return a.NodePattern(variable=node.this, labels=node.labels)
         return node
@@ -665,7 +671,10 @@ class Parser:
             # <-[...]-  or  <--  or  <-->
             if self._check(TokenKind.LBRACKET):
                 rel = self._parse_rel_detail(direction)
-                self._expect(TokenKind.MINUS)
+                if self._match(TokenKind.ARROW_RIGHT):
+                    rel.direction = a.Direction.BOTH
+                else:
+                    self._expect(TokenKind.MINUS)
                 return rel
             if self._match(TokenKind.ARROW_RIGHT):
                 return a.RelationshipPattern(direction=a.Direction.BOTH)
@@ -810,6 +819,45 @@ class Parser:
         self._expect(TokenKind.RPAREN)
         return a.Quantifier(name=name.lower(), variable=var, source=source, where=where_expr)
 
+    def _parse_list_lambda(self, name: str) -> a.ListLambda:
+        """Parse legacy filter/extract and reduce expression syntax."""
+        lower = name.lower()
+        self._expect(TokenKind.LPAREN)
+        accumulator: a.Identifier | None = None
+        initial: a.AstNode | None = None
+        if lower == "reduce":
+            accumulator = self.parse_variable()
+            self._expect(TokenKind.EQ)
+            initial = self.parse_expression()
+            self._expect(TokenKind.COMMA)
+        variable = self.parse_variable()
+        self._expect(TokenKind.IN)
+        source = self.parse_expression()
+        if lower == "filter":
+            self._expect(TokenKind.WHERE)
+        else:
+            self._expect(TokenKind.PIPE)
+        expression = self.parse_expression()
+        self._expect(TokenKind.RPAREN)
+        return a.ListLambda(
+            name=lower,
+            variable=variable,
+            source=source,
+            expression=expression,
+            accumulator=accumulator,
+            initial=initial,
+        )
+
+    def _parse_count_subquery(self) -> a.CountSubquery:
+        self._expect(TokenKind.COUNT)
+        self._expect(TokenKind.LBRACE)
+        if self._looks_like_pattern_start():
+            query: a.AstNode = self.parse_path_pattern()
+        else:
+            query = self.parse_statement()
+        self._expect(TokenKind.RBRACE)
+        return a.CountSubquery(query=query)
+
     # --- expressions (Pratt-ish precedence climbing) ----------------------
 
     def parse_expression(self) -> a.AstNode:
@@ -900,6 +948,8 @@ class Parser:
                 left = a.LTE(this=left, expression=self.parse_add())
             elif self._match(TokenKind.GTE):
                 left = a.GTE(this=left, expression=self.parse_add())
+            elif self._match(TokenKind.REGEX):
+                left = a.RegexMatch(this=left, expression=self.parse_add())
             elif self._check(TokenKind.STARTS):
                 self._advance()
                 self._expect(TokenKind.WITH)
@@ -994,7 +1044,9 @@ class Parser:
         tok = self._peek()
         if tok.kind is TokenKind.INTEGER:
             self._advance()
-            return a.Integer(this=int(tok.text))
+            lower = tok.text.lower()
+            base = 16 if lower.startswith("0x") else 8 if lower.startswith("0o") else 10
+            return a.Integer(this=int(tok.text, base))
         if tok.kind is TokenKind.FLOAT:
             self._advance()
             return a.Float(this=float(tok.text))
@@ -1021,6 +1073,8 @@ class Parser:
             return self.parse_map_literal()
         if tok.kind is TokenKind.EXISTS:
             return self.parse_exists()
+        if tok.kind is TokenKind.COUNT and self._peek(1).kind is TokenKind.LBRACE:
+            return self._parse_count_subquery()
         if tok.kind in (TokenKind.ALL, TokenKind.ANY, TokenKind.NONE, TokenKind.SINGLE):
             return self._parse_quantifier(self._advance().text)
         if tok.kind is TokenKind.LPAREN:
@@ -1032,6 +1086,7 @@ class Parser:
             TokenKind.COLLECT,
             TokenKind.SHORTESTPATH,
             TokenKind.ALLSHORTESTPATHS,
+            TokenKind.FILTER,
         ):
             name_tok = self._advance()
             name = name_tok.text
@@ -1043,6 +1098,8 @@ class Parser:
                     name = "allShortestPaths"
                 else:
                     name = name.lower()
+            if name.lower() in {"extract", "filter", "reduce"}:
+                return self._parse_list_lambda(name)
             if self._check(TokenKind.DOT):
                 probe = self._i
                 dotted = name
@@ -1080,7 +1137,18 @@ class Parser:
         """``EXISTS { query }`` or ``EXISTS ( pattern )`` / ``exists(expr)``."""
         self._expect(TokenKind.EXISTS)
         if self._match(TokenKind.LBRACE):
-            inner = self.parse_statement()
+            if self._looks_like_pattern_start():
+                path = self.parse_path_pattern()
+                where = (
+                    a.Where(this=self.parse_expression())
+                    if self._match(TokenKind.WHERE)
+                    else None
+                )
+                inner: a.AstNode = a.Query(
+                    clauses=[a.Match(pattern=a.Pattern(paths=[path]), where=where)]
+                )
+            else:
+                inner = self.parse_statement()
             self._expect(TokenKind.RBRACE)
             return a.PatternPredicate(pattern=inner, not_=False)
         self._expect(TokenKind.LPAREN)

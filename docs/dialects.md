@@ -76,6 +76,9 @@ This documents in-memory executor support only — not live Neo4j / Memgraph / P
 - `require_labelled_nodes`
 - `allow_cartesian_match_paths` / `rewrite_cartesian_match_paths`
 - `allow_list_concat`, `allow_distinct_with_aggregate`, …
+- `allowed_functions`, `unsupported_functions`, `function_arity_overrides`
+- `allow_map_projection`, `allow_exists_subquery`, `allow_count_subquery`
+- `allow_write_clauses`, `allow_parameters`, `allow_multi_label_nodes`
 - `rewrite_unguarded_optional_scalar_use` (FET-45 CASE rewrite)
 - `optional_risky_functions` (which calls FET-45 guards — PuppyGraph sets id/split/…)
 - `allow_mismatched_case_arms` (ET-16/ET-17)
@@ -83,26 +86,29 @@ This documents in-memory executor support only — not live Neo4j / Memgraph / P
 
 **Rule:** engine limits go in capabilities + named constraint rules — transforms rewrite, validate rejects. Do not hard-code customer labels/rel types in dialect code.
 
-## PuppyGraph (write dialect)
+## PuppyGraph (read-only target dialect)
 
 PuppyGraph subclasses openCypher. On `optimize` / `validate` it typically:
 
 | Behavior | Notes |
 |----------|--------|
-| Require labelled MATCH nodes | `ensure_labelled_nodes`: mine/infer from query + caller `schema=`; residual `:_Node` |
-| Reject true Cartesians | Disjoint multi-path MATCH; adjacent consecutive MATCH with no shared vars |
-| Allow connected multi-path | e.g. `MATCH (a), (a)-[:R]->(b)` |
+| Allow bare / unlabelled MATCH | Never invent `:_Node`; preserves result cardinality |
+| Allow Cartesian and connected multi-path | Verified against the live engine |
+| Reject unbounded variable-length patterns | Use an explicit upper bound; no cypherast maximum for bounded forms |
+| Reject writes and admin clauses | PuppyGraph graph projection is read-only |
+| Allow list comprehensions / list concat | Reject pattern comprehensions and map projections |
+| Allow `CALL { … }` and `exists(prop)` | Reject `EXISTS { … }` and `COUNT { … }` expressions |
 | Reject APT-18 / TE-14 / DISTINCT+agg landmines | Reject, don’t greenwash |
 | Strip `NULLS FIRST/LAST` | Rewrite |
 | Guard OPTIONAL `id()`/`split`/… | FET-45 CASE rewrite; `id(var) IS NOT NULL` counts; OR does not |
 | Reject mismatched CASE arms | ET-16/ET-17: list↔list-lit, list↔map, list↔scalar (`allow_mismatched_case_arms=False`) |
-| Undefined vars | **CG1201** (`WITH *`, SET/DELETE/REMOVE, comprehension binders, `CALL { }` RETURN exports) |
-| No default domain schema | Pass caller `GraphSchema` for endpoint inference; omit → query mine + `:_Node` residual |
+| Undefined vars | **CG1201** (`WITH *`, quantifier/comprehension binders, `CALL { }` RETURN exports) |
+| Function policy | Capability allow/deny sets plus PuppyGraph arity overrides |
 
 **Non-goals for PuppyGraph in cypherast:**
 
 - Injecting `LIMIT`
-- Enforcing max hops / rejecting unbounded `*` (query_guard / prevalid)
+- Enforcing a maximum for explicitly bounded hops (query_guard / prevalid)
 - Domain property catalogs / tutorial `person`/`software` inject without caller `GraphSchema`
 - Inventing endpoint labels by copying the neighbor when schema has no endpoints
 - Running graph algorithms inside `optimize` / in-memory `run` (parse+render only; execute on PuppyGraph)
@@ -131,7 +137,8 @@ MATCH (n:Person) WHERE (n)-[:KNOWS]->(:Person) RETURN n
 MATCH (n:Person) WHERE (n)-[:KNOWS]->(m:Person) RETURN n
 ```
 
-Do not invent `_n_*` qualifiers inside pattern predicates when `require_labelled_nodes` is on.
+Do not invent labels in PuppyGraph patterns. The shared qualifier may name
+anonymous nodes, but must not add `:_Node`.
 
 ## openCypher 9
 
@@ -144,7 +151,11 @@ cypherast.validate(q, dialect="opencypher")
 cypherast.optimize(q, write="opencypher")
 ```
 
-PuppyGraph subclasses openCypher and extends the same OC9 base via `dataclasses.replace` with engine-specific constraints (labelled nodes, Cartesian rejection, FET-45, etc.). Unlike strict OC9 validate, PuppyGraph **allows** binding a variable to a variable-length relationship (`-[r*1..n]->`); use anonymous or path variables only when targeting `opencypher` / `opencypher9`.
+PuppyGraph subclasses openCypher and extends the same OC9 base via
+`dataclasses.replace` with live-engine-verified read constraints. Unlike strict
+OC9 validation, PuppyGraph allows undirected patterns, `CALL { … }`,
+`exists(prop)`, and binding a variable to a bounded variable-length
+relationship (`-[r*1..n]->`).
 
 Spec reference: [openCypher 9 (PDF)](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
 
