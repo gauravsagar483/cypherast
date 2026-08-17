@@ -172,6 +172,20 @@ def test_list_comprehension_roundtrip() -> None:
     assert cypherast.parse_one(out).find(a.ListComprehension) is not None
 
 
+def test_regex_match_roundtrip() -> None:
+    q = "RETURN 'abc' =~ 'a.*' AS ok"
+    tree = cypherast.parse_one(q, read="opencypher")
+    assert tree.find(a.RegexMatch) is not None
+    assert "=~" in tree.cypher(dialect="opencypher")
+
+
+def test_backticked_identifier_roundtrip() -> None:
+    q = "RETURN 1 AS `weird name`"
+    out = cypherast.parse_one(q, read="opencypher").cypher(dialect="opencypher")
+    assert "`weird name`" in out
+    assert cypherast.parse_one(out, read="opencypher") is not None
+
+
 def test_list_comprehension_executor() -> None:
     result = cypherast.run("RETURN [x IN range(1, 3) | x * 2] AS xs", graph=Graph())
     assert list(result)[0]["xs"] == [2, 4, 6]

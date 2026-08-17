@@ -35,7 +35,14 @@ CLI entry: `cypherast.cli:main` (`uv run cypherast …`).
 Registered under `cypherast/dialects/`: `opencypher`, `neo4j25` (`neo4j`/`neo`), `neo4j5` (`cypher5`), `memgraph`, `puppygraph`.
 `Dialect.optimize` runs `cypherast.optimizer` `RULES` then `constraint_rules(capabilities)`, then raises if `strict` (default).
 Renderer `unsupported` sets are built by `build_unsupported(capabilities, …)` in `dialects/cypher.py` — gate a construct by adding it to `CAPABILITY_GATED_NODES`, not by hand-listing nodes per renderer. Clause words Neo4j does not reserve (`LOAD`, `GROUP`, `ROWS`, `SEARCH`, `SHOW`, …) stay `IDENT` and are matched with the parser's `_check_word` / `_expect_word` helpers; adding them to `KEYWORDS` would break their use as variables.
-PuppyGraph caps are generic engine limits (labelled MATCH, no Cartesian multi-path MATCH, FET-45 CASE guard, etc.) — keep dialect code free of domain-specific label/rel names. Hop caps and missing `LIMIT` are non-goals (query_guard / caller). Graph algorithms (`algo.*`) = parse/render `CallProcedure` then run on the engine; not optimizer rewrites.
+PuppyGraph caps are generic, live-engine-verified read limits: unlabelled and
+Cartesian MATCH are accepted; unbounded variable-length patterns, writes, map /
+pattern comprehensions, map projections, and EXISTS/COUNT subqueries are
+rejected. Bounded hop caps and missing `LIMIT` are non-goals. Function
+allow/deny/arity deltas belong in `DialectCapabilities`, not validator
+hard-coding. Keep dialect code free of domain-specific label/rel names. Graph
+algorithms (`algo.*`) = parse/render `CallProcedure` then run on the engine; not
+optimizer rewrites.
 
 ### Neutral Cypher core (`dialects/lower.py`)
 

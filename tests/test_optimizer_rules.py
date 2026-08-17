@@ -70,7 +70,7 @@ def test_ruleset_disable_unknown_raises():
 
 def test_puppygraph_constraint_rule_names():
     names = PuppyGraph.constraint_rule_set().names
-    assert "ensure_labelled_nodes" in names
+    assert "ensure_labelled_nodes" not in names
     assert "ensure_row_limit" not in names
     assert "guard_optional_scalar_use" in names
     # Reject-only (no silent rewrite that greenwashes engine failures)
@@ -96,4 +96,4 @@ def test_opt_in_merge_match_chains():
 def test_constraint_rules_builder():
     rs = constraint_rules(PuppyGraph.capabilities)
     assert isinstance(rs, RuleSet)
-    assert len(rs) >= 3
+    assert {"strip_nulls_order_modifiers", "guard_optional_scalar_use"} <= set(rs.names)

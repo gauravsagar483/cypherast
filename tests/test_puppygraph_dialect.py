@@ -12,18 +12,19 @@ def test_capabilities_flags():
     caps = PuppyGraph.capabilities
     assert caps.reject_excluded_clauses
     assert caps.check_function_signatures
-    assert caps.reject_undirected_patterns
+    assert not caps.reject_undirected_patterns
     assert not caps.reject_var_length_binding
-    assert caps.reject_call_subquery
+    assert not caps.reject_call_subquery
     assert caps.reject_gql_nodes
     assert caps.reject_quantified_path
-    assert caps.require_labelled_nodes
-    assert not caps.allow_cartesian_match_paths
+    assert not caps.require_labelled_nodes
+    assert caps.allow_cartesian_match_paths
     assert caps.max_var_length_hops is None
-    assert caps.allow_unbounded_var_length
+    assert not caps.allow_unbounded_var_length
     assert not caps.rewrite_var_length_bounds
-    assert not caps.allow_exists_function
-    assert not caps.allow_list_comprehension
+    assert caps.allow_exists_function
+    assert caps.allow_list_comprehension
+    assert not caps.allow_pattern_comprehension
     assert caps.max_collect_distinct_per_clause == 1
     assert not caps.rewrite_collect_distinct_cap
     assert not caps.allow_collect_distinct_with_other_aggregates
@@ -33,7 +34,7 @@ def test_capabilities_flags():
     assert not caps.allow_id_in_string_predicates
     assert not caps.allow_unguarded_optional_scalar_use
     assert caps.rewrite_unguarded_optional_scalar_use
-    assert not caps.rewrite_cartesian_match_paths
+    assert caps.rewrite_cartesian_match_paths
     assert not caps.rewrite_distinct_beside_aggregate
 
 
@@ -60,13 +61,12 @@ def test_first_last_as_identifiers_and_nulls_order():
     assert "first" in out.lower()
 
 
-def test_create_return_in_scope():
-    """P2: CREATE binders are in scope for RETURN."""
-    opt = cypherast.optimize(
-        "CREATE (n:person {name: 'x'}) RETURN n",
-        write="puppygraph",
-    )
-    assert "CREATE" in opt.cypher(dialect="puppygraph").upper()
+def test_create_is_rejected_on_read_only_surface():
+    with pytest.raises(ValidationError):
+        cypherast.optimize(
+            "CREATE (n:person {name: 'x'}) RETURN n",
+            write="puppygraph",
+        )
 
 
 def test_pattern_pred_reuse_ok_new_binder_rejected():
@@ -84,18 +84,17 @@ def test_pattern_pred_reuse_ok_new_binder_rejected():
     assert "new variables" in str(ei.value).lower() or "Pattern predicates" in str(ei.value)
 
 
-def test_list_concat_alias_and_not_subscript():
-    """P4: collect aliases flagged; split()[0] + string not list-concat."""
-    bad = cypherast.validate(
+def test_list_concat_and_string_concat_are_supported():
+    list_issues = cypherast.validate(
         "MATCH (m:Metric) WITH collect(m.name) AS a, collect(m.name) AS b RETURN a + b LIMIT 20",
         dialect="puppygraph",
     )
-    assert any("List concatenation" in i.message for i in bad)
-    ok = cypherast.validate(
+    assert not any("List concatenation" in i.message for i in list_issues)
+    string_issues = cypherast.validate(
         "MATCH (m:Metric) RETURN split(m.name, '_')[0] + '_x' AS x LIMIT 20",
         dialect="puppygraph",
     )
-    assert not any("List concatenation" in i.message for i in ok)
+    assert not any("List concatenation" in i.message for i in string_issues)
 
 
 def test_optimize_does_not_inject_limit():
@@ -128,18 +127,11 @@ def test_optimize_pure_aggregate_ok_without_limit():
     assert "LIMIT" not in out.upper()
 
 
-def test_optimize_splits_cartesian_match():
-    """Cartesian comma MATCH: optimize raises — do not greenwash with split."""
+def test_optimize_allows_cartesian_match():
     q = "MATCH (a:Person), (b:Person) RETURN a, b LIMIT 10"
-    with pytest.raises(ValidationError) as ei:
-        cypherast.optimize(q, write="puppygraph")
-    assert ei.value.code in {"CG1401", "CG1402"} or "Cartesian" in str(ei.value)
-    # Soft path still leaves comma MATCH (rewrite disabled)
-    soft = cypherast.optimize(q, write="puppygraph", strict=False)
-    out = soft.cypher(dialect="puppygraph")
+    out = cypherast.optimize(q, write="puppygraph").cypher(dialect="puppygraph")
     assert out.upper().count("MATCH") == 1
-    issues = cypherast.validate(soft, dialect="puppygraph")
-    assert any("Cartesian" in i.message or "Multiple paths" in i.message for i in issues)
+    assert "," in out
 
 
 def test_optimize_caps_collect_distinct():
@@ -234,7 +226,7 @@ def test_validate_list_comprehension():
         "MATCH (n:Person) RETURN [x IN [1,2] | x] AS xs LIMIT 5",
         dialect="puppygraph",
     )
-    assert any("List comprehension" in i.message for i in issues)
+    assert not any("List comprehension" in i.message for i in issues)
 
 
 def test_validate_unlabelled_match():
@@ -242,7 +234,7 @@ def test_validate_unlabelled_match():
         "MATCH (n) RETURN n LIMIT 5",
         dialect="puppygraph",
     )
-    assert any(i.code == "CG1402" or "Unlabelled" in i.message for i in issues)
+    assert not any(i.code == "CG1402" or "Unlabelled" in i.message for i in issues)
 
 
 def test_validate_bound_reuse_unlabelled_ok():
@@ -254,16 +246,15 @@ def test_validate_bound_reuse_unlabelled_ok():
     assert not any(i.code == "CG1402" for i in issues)
 
 
-def test_validate_new_unlabelled_endpoint_still_fails():
+def test_validate_new_unlabelled_endpoint_is_supported():
     issues = cypherast.validate(
         "MATCH (a:person)-[:knows|created]->(b) RETURN a.name LIMIT 20",
         dialect="puppygraph",
     )
-    assert any(i.code == "CG1402" and "(b)" in i.message for i in issues)
+    assert not any(i.code == "CG1402" for i in issues)
 
 
-def test_optimize_propagates_label_without_schema_rel():
-    """With schema endpoints, unlabelled end is filled (no neighbor-copy hack)."""
+def test_optimize_does_not_invent_endpoint_label():
     gs = GraphSchema()
     gs.add_label("Metric")
     gs.add_rel("DERIVED_FROM", "Metric", "Metric")
@@ -274,7 +265,7 @@ def test_optimize_propagates_label_without_schema_rel():
     )
     out = opt.cypher(dialect="puppygraph")
     assert ":Metric" in out
-    assert "(b:Metric)" in out.replace(" ", "") or "b:Metric" in out
+    assert "(b)" in out.replace(" ", "")
     assert not any(i.code == "CG1402" for i in cypherast.validate(opt, dialect="puppygraph"))
 
 
@@ -311,22 +302,20 @@ def test_optimize_prior_bound_label_not_neighbor_copy():
     assert not any(i.code == "CG1402" for i in cypherast.validate(opt, dialect="puppygraph"))
 
 
-def test_optimize_labels_anonymous_endpoints():
-    """No schema → residual :_Node on bare ends (not domain invent)."""
+def test_optimize_does_not_label_anonymous_endpoints():
     opt = cypherast.optimize(
         "MATCH ()-[e:knows]->() RETURN e LIMIT 20",
         write="puppygraph",
     )
     out = opt.cypher(dialect="puppygraph")
     assert "()" not in out.replace(" ", "")
-    assert ":_Node" in out or "_Node" in out
+    assert "_Node" not in out
     assert "knows" in out.lower()
     issues = cypherast.validate(opt, dialect="puppygraph")
     assert not any(i.code == "CG1402" for i in issues)
 
 
-def test_optimize_labels_multi_rel_end():
-    """knows|created → end gets :person|software when schema has endpoints."""
+def test_optimize_does_not_invent_multi_rel_end_label():
     gs = GraphSchema()
     gs.add_label("person")
     gs.add_label("software")
@@ -338,32 +327,27 @@ def test_optimize_labels_multi_rel_end():
         schema=gs,
     )
     out = opt.cypher(dialect="puppygraph")
-    assert "person|software" in out.lower() or (
-        ":person" in out.lower() and "software" in out.lower()
-    )
+    assert "(b)" in out.replace(" ", "")
     issues = cypherast.validate(opt, dialect="puppygraph")
     assert not any(i.code == "CG1402" for i in issues)
 
 
-def test_optimize_bare_residual_node():
-    """Bare MATCH (n) → (n:_Node); no CG1402 after optimize."""
+def test_optimize_bare_node_stays_bare():
     opt = cypherast.optimize("MATCH (n) RETURN n", write="puppygraph")
     out = opt.cypher(dialect="puppygraph")
-    assert "n:_Node" in out.replace(" ", "")
+    assert "(n)" in out.replace(" ", "")
+    assert "_Node" not in out
     assert not any(i.code == "CG1402" for i in cypherast.validate(opt, dialect="puppygraph"))
 
 
-def test_call_subquery_rejected_by_oc9():
-    """OC9 (and PuppyGraph) reject CALL { … } subqueries."""
+def test_call_subquery_supported_by_puppygraph():
     q = (
         "MATCH (p:Person) CALL { MATCH (a:Animal) RETURN a.name AS animal_name } "
         "RETURN p.name AS person_name, animal_name"
     )
     issues = cypherast.validate(q, dialect="puppygraph")
-    assert any(i.code == "CG1505" for i in issues)
-    with pytest.raises(ValidationError) as ei:
-        cypherast.optimize(q, write="puppygraph")
-    assert ei.value.code == "CG1505"
+    assert not any(i.code == "CG1505" for i in issues)
+    assert cypherast.optimize(q, write="puppygraph")
 
 
 def test_optimize_mines_labels_from_lineage_query():
@@ -393,7 +377,7 @@ def test_validate_list_concat_and_node_in_list():
         "MATCH (n:person) RETURN collect(n.name) + ['x'] AS xs LIMIT 5",
         dialect="puppygraph",
     )
-    assert any("List concatenation" in i.message for i in issues)
+    assert not any("List concatenation" in i.message for i in issues)
     issues2 = cypherast.validate(
         "MATCH (n:person) WHERE n IN [n] RETURN n LIMIT 5",
         dialect="puppygraph",
@@ -425,27 +409,16 @@ def test_harness_reject_apt18_et06_union_id_scope_varlen():
     )
     assert any("At most 1 collect" in i.message or "collect(DISTINCT" in i.message for i in apt18)
 
-    must_raise(
-        "MATCH (m:Metric) WITH collect(DISTINCT m.name) + [m.name] AS names RETURN names LIMIT 20",
-        "concat",
-        "List concatenation",
-    )
     et06 = soft_issues(
         "MATCH (m:Metric) WITH collect(DISTINCT m.name) + [m.name] AS names RETURN names LIMIT 20"
     )
-    assert any("List concatenation" in i.message for i in et06)
+    assert not any("List concatenation" in i.message for i in et06)
 
     et06a = soft_issues(
         "MATCH (m:Metric)-[:DERIVED_FROM]->(base:Metric) WITH m, collect(base.name) AS bases "
         "RETURN m.name AS metric, bases + ['x'] AS combined LIMIT 20"
     )
-    assert any("List concatenation" in i.message for i in et06a)
-    must_raise(
-        "MATCH (m:Metric)-[:DERIVED_FROM]->(base:Metric) WITH m, collect(base.name) AS bases "
-        "RETURN m.name AS metric, bases + ['x'] AS combined LIMIT 20",
-        "concat",
-        "List concatenation",
-    )
+    assert not any("List concatenation" in i.message for i in et06a)
 
     et21 = soft_issues(
         "MATCH (m:Metric)-[:DERIVED_FROM]->(base:Metric) WITH collect(base) AS bases "
@@ -523,27 +496,19 @@ def test_harness_reject_apt18_et06_union_id_scope_varlen():
         "list",
     )
 
-    # Var-length hop caps / unbounded * — query_guard / prevalid only; cypherast OK
-    for q in (
+    # Live engine rejects unbounded *, but does not impose cypherast's own hop cap.
+    must_raise(
         "MATCH (a:Metric)-[:DERIVED_FROM*]->(b:Metric) RETURN a.name LIMIT 20",
+        "unbounded",
+    )
+    bounded = cypherast.optimize(
         "MATCH (a:Metric)-[:DERIVED_FROM*0..6]->(b:Metric) RETURN a.name LIMIT 20",
-    ):
-        opt = cypherast.optimize(q, write="puppygraph")
-        issues = cypherast.validate(opt, dialect="puppygraph")
-        assert not any(
-            "hops" in i.message.lower()
-            or "unbounded" in i.message.lower()
-            or "variable-length" in i.message.lower()
-            for i in issues
-        )
+        write="puppygraph",
+    )
+    assert not cypherast.validate(bounded, dialect="puppygraph")
 
     cart = soft_issues("MATCH (a:Metric), (b:Metric) RETURN a.name LIMIT 20")
-    assert any("Cartesian" in i.message or "Multiple paths" in i.message for i in cart)
-    must_raise(
-        "MATCH (a:Metric), (b:Metric) RETURN a.name LIMIT 20",
-        "Cartesian",
-        "Multiple paths",
-    )
+    assert not any("Cartesian" in i.message or "Multiple paths" in i.message for i in cart)
 
     pjt97 = soft_issues(
         "MATCH (a:Metric)-[:R]->(b:Metric) RETURN DISTINCT a.name AS n, count(b) AS c LIMIT 20"

@@ -34,6 +34,14 @@ from cypherast.dialects.validate.opencypher import (
 )
 from cypherast.dialects.validate.optional_scalar import _unguarded_optional_scalar_use
 from cypherast.dialects.validate.pattern_predicates import _pattern_predicate_bindings
+from cypherast.dialects.validate.read_surface import (
+    _count_subqueries,
+    _exists_subqueries,
+    _map_projections,
+    _multi_label_nodes,
+    _parameters,
+    _write_clauses,
+)
 from cypherast.dialects.validate.schema_props import (
     _schema_property_access,
     _schema_unknown_types,
@@ -70,7 +78,7 @@ def validate_capabilities(
         issues.extend(
             _bad_var_length(
                 tree,
-                max_hops=caps.max_var_length_hops or 5,
+                max_hops=caps.max_var_length_hops,
                 allow_unbounded=caps.allow_unbounded_var_length,
             )
         )
@@ -90,12 +98,34 @@ def validate_capabilities(
                 hint="Expand to MATCH / OPTIONAL MATCH + projection",
             )
         )
+    if not caps.allow_map_projection:
+        issues.extend(_map_projections(tree))
+    if not caps.allow_exists_subquery:
+        issues.extend(_exists_subqueries(tree))
+    if not caps.allow_count_subquery:
+        issues.extend(_count_subqueries(tree))
+    if not caps.allow_multi_label_nodes:
+        issues.extend(_multi_label_nodes(tree))
+    if not caps.allow_write_clauses:
+        issues.extend(_write_clauses(tree))
+    if not caps.allow_parameters:
+        issues.extend(_parameters(tree))
     if not caps.allow_list_concat:
         issues.extend(_list_concat_ops(tree))
     if not caps.allow_node_in_list_membership:
         issues.extend(_node_in_list_membership(tree))
-    if not caps.allow_id_in_string_predicates:
-        issues.extend(_id_in_string_predicates(tree))
+    denied_id_functions = frozenset(
+        name
+        for name, allowed in (
+            ("id", caps.allow_id_in_string_predicates),
+            ("elementid", caps.allow_element_id_in_string_predicates),
+        )
+        if not allowed
+    )
+    if denied_id_functions:
+        issues.extend(
+            _id_in_string_predicates(tree, denied_functions=denied_id_functions)
+        )
     if not caps.allow_unguarded_optional_scalar_use:
         issues.extend(
             _unguarded_optional_scalar_use(tree, risky_functions=caps.optional_risky_functions)
@@ -135,7 +165,7 @@ def validate_capabilities(
     if caps.reject_using_hints:
         issues.extend(_reject_using_hints(tree))
     if caps.check_function_signatures:
-        issues.extend(_function_signature_issues(tree))
+        issues.extend(_function_signature_issues(tree, caps))
     if caps.check_comparability:
         issues.extend(comparability_issues(tree))
     issues.extend(_reject_cypher25_only(tree, caps))

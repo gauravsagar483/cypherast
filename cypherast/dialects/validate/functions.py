@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from cypherast import ast as a
+from cypherast.dialects.capabilities import DialectCapabilities
 from cypherast.dialects.validate.issues import ConstraintIssue
 from cypherast.schema import (
     AGGREGATE_FUNCTIONS,
@@ -16,13 +17,39 @@ from cypherast.schema import (
 _AGGREGATES = AGGREGATE_FUNCTIONS
 
 
-def _function_signature_issues(tree: a.AstNode) -> list[ConstraintIssue]:
+def _function_signature_issues(
+    tree: a.AstNode, caps: DialectCapabilities
+) -> list[ConstraintIssue]:
     issues: list[ConstraintIssue] = []
-    for node in tree.find_all(a.FunctionCall):
-        assert isinstance(node, a.FunctionCall)
-        raw = str(node.name)
+    arity_overrides = {
+        name.lower(): (min_args, max_args)
+        for name, min_args, max_args in caps.function_arity_overrides
+    }
+    nodes = tree.find_all(a.FunctionCall, a.Coalesce, a.Quantifier, a.ListLambda)
+    for node in nodes:
+        if isinstance(node, a.FunctionCall):
+            raw = str(node.name)
+            nargs = len(node.expressions)
+        elif isinstance(node, a.Coalesce):
+            raw = "coalesce"
+            nargs = len(node.expressions)
+        elif isinstance(node, a.Quantifier):
+            raw = str(node.name)
+            nargs = 1
+        else:
+            assert isinstance(node, a.ListLambda)
+            raw = str(node.name)
+            nargs = 1
         lower = raw.lower()
-        if lower in OC9_EXCLUDED_FUNCTIONS:
+        if lower in caps.unsupported_functions:
+            issues.append(
+                ConstraintIssue(
+                    "CG1507",
+                    f"Function {raw!r} is not supported by this dialect",
+                )
+            )
+            continue
+        if lower in OC9_EXCLUDED_FUNCTIONS and lower not in caps.allowed_functions:
             issues.append(
                 ConstraintIssue(
                     "CG1507",
@@ -30,6 +57,8 @@ def _function_signature_issues(tree: a.AstNode) -> list[ConstraintIssue]:
                     hint="See standardisation-scope.adoc for included functions",
                 )
             )
+            continue
+        if isinstance(node, (a.Quantifier, a.ListLambda)):
             continue
         sig = lookup_function(raw)
         if sig is None:
@@ -41,7 +70,18 @@ def _function_signature_issues(tree: a.AstNode) -> list[ConstraintIssue]:
                 )
             )
             continue
-        nargs = len(node.expressions)
+        if lower in arity_overrides:
+            min_args, max_args = arity_overrides[lower]
+            if nargs < min_args or nargs > max_args:
+                issues.append(
+                    ConstraintIssue(
+                        "CG1509",
+                        f"Function {raw!r} expects {min_args}"
+                        + (f"–{max_args}" if max_args != min_args else "")
+                        + f" argument(s), got {nargs}",
+                    )
+                )
+            continue
         if lower in FUNCTION_VARIADIC_MIN:
             if nargs < FUNCTION_VARIADIC_MIN[lower]:
                 issues.append(

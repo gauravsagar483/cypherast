@@ -57,10 +57,17 @@ def _undefined_variables(tree: a.AstNode) -> list[ConstraintIssue]:
         out: set[str] = set()
         if node is None:
             return out
-        for comp in node.find_all(a.ListComprehension, a.PatternComprehension):
-            if isinstance(comp, a.ListComprehension):
+        for comp in node.find_all(
+            a.ListComprehension, a.PatternComprehension, a.Quantifier, a.ListLambda
+        ):
+            if isinstance(comp, (a.ListComprehension, a.Quantifier)):
                 if isinstance(comp.variable, a.Identifier):
                     out.add(comp.variable.this)
+            elif isinstance(comp, a.ListLambda):
+                if isinstance(comp.variable, a.Identifier):
+                    out.add(comp.variable.this)
+                if isinstance(comp.accumulator, a.Identifier):
+                    out.add(comp.accumulator.this)
             elif isinstance(comp, a.PatternComprehension):
                 if isinstance(comp.variable, a.Identifier):
                     out.add(comp.variable.this)

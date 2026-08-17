@@ -23,6 +23,15 @@ class Renderer:
         a.QuantifiedPath,
     }
 
+    @staticmethod
+    def _identifier(name: object) -> str:
+        text = str(name)
+        if text and (text[0].isalpha() or text[0] == "_") and all(
+            ch.isalnum() or ch == "_" for ch in text[1:]
+        ):
+            return text
+        return f"`{text.replace('`', '``')}`"
+
     def generate(self, node: a.AstNode, pretty: bool = False) -> str:
         self._pretty = pretty
         self._indent = 0
@@ -327,14 +336,14 @@ class Renderer:
     def render_LabelExpression(self, node: a.LabelExpression) -> str:
         if node.expression:
             return f":{node.expression}"
-        return "".join(f":{lab}" for lab in (node.labels or []))
+        return "".join(f":{self._identifier(lab)}" for lab in (node.labels or []))
 
     def render_RelationshipPattern(self, node: a.RelationshipPattern) -> str:
         inner_parts: list[str] = []
         if node.variable:
             inner_parts.append(self.dispatch(node.variable))
         if node.types:
-            inner_parts.append(":" + "|".join(node.types))
+            inner_parts.append(":" + "|".join(self._identifier(t) for t in node.types))
         if node.variable_length:
             star = "*"
             bounds = ""
@@ -389,10 +398,10 @@ class Renderer:
         return "*"
 
     def render_Identifier(self, node: a.Identifier) -> str:
-        return str(node.this)
+        return self._identifier(node.this)
 
     def render_Property(self, node: a.Property) -> str:
-        return f"{self.dispatch(node.this)}.{node.name}"
+        return f"{self.dispatch(node.this)}.{self._identifier(node.name)}"
 
     def render_Parameter(self, node: a.Parameter) -> str:
         return f"${node.name}"
@@ -528,6 +537,9 @@ class Renderer:
     def render_Contains(self, node: a.Contains) -> str:
         return self._bin(node, "CONTAINS")
 
+    def render_RegexMatch(self, node: a.RegexMatch) -> str:
+        return self._bin(node, "=~")
+
     def render_Not(self, node: a.Not) -> str:
         return f"NOT {self.dispatch(node.this)}"
 
@@ -570,6 +582,23 @@ class Renderer:
         if node.where:
             body += f" WHERE {self.dispatch(node.where)}"
         return f"{node.name}({body})"
+
+    def render_ListLambda(self, node: a.ListLambda) -> str:
+        variable = self.dispatch(node.variable)
+        source = self.dispatch(node.source)
+        expression = self.dispatch(node.expression)
+        if node.name == "reduce":
+            accumulator = self.dispatch(node.accumulator)
+            initial = self.dispatch(node.initial)
+            return (
+                f"reduce({accumulator} = {initial}, {variable} IN {source} | "
+                f"{expression})"
+            )
+        separator = " WHERE " if node.name == "filter" else " | "
+        return f"{node.name}({variable} IN {source}{separator}{expression})"
+
+    def render_CountSubquery(self, node: a.CountSubquery) -> str:
+        return f"COUNT {{ {self.dispatch(node.query)} }}"
 
     def render_PatternComprehension(self, node: a.PatternComprehension) -> str:
         prefix = f"{self.dispatch(node.variable)} = " if node.variable else ""

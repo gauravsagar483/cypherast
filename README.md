@@ -171,13 +171,15 @@ make translate Q="MATCH (n:Person) RETURN n" FROM=opencypher TO=puppygraph OPT=1
 
 ## Dialects
 
-`opencypher` · `neo4j25` (`neo4j`/`neo`) · `neo4j5` (`cypher5`) · `memgraph` · `puppygraph` (read+write). Gremlin/GQL generators = v1.x.
+`opencypher` · `neo4j25` (`neo4j`/`neo`) · `neo4j5` (`cypher5`) · `memgraph` · `puppygraph` (read-only target). Gremlin/GQL generators = v1.x.
 
 openCypher 9 spec: [openCypher9.pdf](https://s3.amazonaws.com/artifacts.opencypher.org/openCypher9.pdf).
 
 `puppygraph` subclasses openCypher and applies engine capability constraints on optimize/translate
-(labelled MATCH, no Cartesian multi-path MATCH, strip `NULLS FIRST/LAST`, FET-45 null CASE, etc.).
-Does **not** inject `LIMIT` or enforce hop caps (leave those to the engine / query_guard).
+(reject writes, unbounded variable-length patterns, map/pattern projections and subquery
+expressions; strip `NULLS FIRST/LAST`; apply FET-45 null CASE guards). Unlabelled,
+undirected, and Cartesian MATCH are accepted. Bounded hop limits remain an engine /
+query-guard concern. Does **not** inject `LIMIT`.
 
 Procedure `CALL ns.proc(…) [YIELD …]` parses and renders for all dialects (including PuppyGraph
 `algo.*`). Optimize leaves procedure calls as pass-through; run algorithms on the engine, not

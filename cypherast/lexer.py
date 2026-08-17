@@ -40,6 +40,7 @@ class TokenKind(Enum):
     GT = auto()  # >
     LTE = auto()  # <=
     GTE = auto()  # >=
+    REGEX = auto()  # =~
     PLUS = auto()  # +
     MINUS = auto()  # -
     STAR = auto()  # *
@@ -261,6 +262,9 @@ class Lexer:
         if two == ">=":
             self._advance(2)
             return Token(TokenKind.GTE, ">=", pos, self._take_comments())
+        if two == "=~":
+            self._advance(2)
+            return Token(TokenKind.REGEX, "=~", pos, self._take_comments())
         if two == "<-":
             self._advance(2)
             return Token(TokenKind.ARROW_LEFT, "<-", pos, self._take_comments())
