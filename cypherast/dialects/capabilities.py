@@ -57,6 +57,12 @@ class DialectCapabilities:
     allow_distinct_with_aggregate: bool = True
     # When False, do not silently drop DISTINCT beside aggregates (reject via validate)
     rewrite_distinct_beside_aggregate: bool = True
+    # When False, a projection item may not combine an aggregate with a bare
+    # reference (``RETURN n.age + count(*)``); grouping keys must be standalone.
+    # PuppyGraph's AggregationMixingCheck is stricter than Neo4j here (Neo4j
+    # accepts an exact standalone grouping key inside the aggregate expression),
+    # so only PuppyGraph sets this off.
+    allow_mixed_aggregate_projection: bool = True
     allow_nulls_order_modifiers: bool = True
 
     # Result shaping

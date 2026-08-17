@@ -326,7 +326,13 @@ class Parser:
 
     def parse_set_target(self) -> a.AstNode:
         """SET LHS: property / variable / labels — must not consume ``=`` as comparison."""
-        node = self.parse_postfix()
+        if self._match(TokenKind.LPAREN):
+            node = self.parse_expression()
+            self._expect(TokenKind.RPAREN)
+            while self._match(TokenKind.DOT):
+                node = a.Property(this=node, name=self._parse_unquoted_name())
+        else:
+            node = self.parse_postfix()
         if isinstance(node, a.LabelPredicate) and isinstance(node.this, a.Identifier):
             return a.NodePattern(variable=node.this, labels=node.labels)
         return node
@@ -665,7 +671,10 @@ class Parser:
             # <-[...]-  or  <--  or  <-->
             if self._check(TokenKind.LBRACKET):
                 rel = self._parse_rel_detail(direction)
-                self._expect(TokenKind.MINUS)
+                if self._match(TokenKind.ARROW_RIGHT):
+                    rel.direction = a.Direction.BOTH
+                else:
+                    self._expect(TokenKind.MINUS)
                 return rel
             if self._match(TokenKind.ARROW_RIGHT):
                 return a.RelationshipPattern(direction=a.Direction.BOTH)
@@ -994,7 +1003,9 @@ class Parser:
         tok = self._peek()
         if tok.kind is TokenKind.INTEGER:
             self._advance()
-            return a.Integer(this=int(tok.text))
+            lower = tok.text.lower()
+            base = 16 if lower.startswith("0x") else 8 if lower.startswith("0o") else 10
+            return a.Integer(this=int(tok.text, base))
         if tok.kind is TokenKind.FLOAT:
             self._advance()
             return a.Float(this=float(tok.text))
@@ -1080,7 +1091,18 @@ class Parser:
         """``EXISTS { query }`` or ``EXISTS ( pattern )`` / ``exists(expr)``."""
         self._expect(TokenKind.EXISTS)
         if self._match(TokenKind.LBRACE):
-            inner = self.parse_statement()
+            if self._looks_like_pattern_start():
+                path = self.parse_path_pattern()
+                where = (
+                    a.Where(this=self.parse_expression())
+                    if self._match(TokenKind.WHERE)
+                    else None
+                )
+                inner: a.AstNode = a.Query(
+                    clauses=[a.Match(pattern=a.Pattern(paths=[path]), where=where)]
+                )
+            else:
+                inner = self.parse_statement()
             self._expect(TokenKind.RBRACE)
             return a.PatternPredicate(pattern=inner, not_=False)
         self._expect(TokenKind.LPAREN)

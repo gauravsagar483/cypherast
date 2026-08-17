@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Official openCypher TCK parse coverage now expands Scenario Outlines and scores all 3,897
+  compiled scenarios. Compile-time-error scenarios accept parser rejection; positive and runtime
+  scenarios must parse. Current parse rate is 100%.
+- Parser support for hexadecimal and octal integer literals, bare patterns inside `EXISTS { … }`,
+  parenthesized `SET (expr).property` targets, and detailed bidirectional relationship patterns.
+- `allow_mixed_aggregate_projection` capability (off for PuppyGraph only): a projection item
+  may not combine an aggregate with a bare reference, as in `RETURN n.age + count(*)`, matching
+  PuppyGraph's `AggregationMixingCheck`. Validate reports `CG1401` with a hint to aggregate in
+  an earlier `WITH` and combine the aliases afterwards. Arithmetic over aggregates alone
+  (`count(*) + 1`) and standalone grouping keys beside aggregates stay valid. Left on for
+  Neo4j / Memgraph / openCypher, which accept an exact standalone grouping key inside the
+  aggregate expression.
+
 ## [0.1.10] - 2026-08-08
 
 ### Added

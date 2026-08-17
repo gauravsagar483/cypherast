@@ -49,6 +49,7 @@ class PuppyGraph(OpenCypher):
         allow_collect_distinct_with_other_aggregates=False,
         allow_distinct_with_aggregate=False,
         rewrite_distinct_beside_aggregate=False,
+        allow_mixed_aggregate_projection=False,
         allow_nulls_order_modifiers=False,
         require_matching_union_columns=True,
         pattern_predicate_introduces_bindings=False,

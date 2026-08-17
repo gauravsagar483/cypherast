@@ -87,8 +87,7 @@ def test_pattern_pred_reuse_ok_new_binder_rejected():
 def test_list_concat_alias_and_not_subscript():
     """P4: collect aliases flagged; split()[0] + string not list-concat."""
     bad = cypherast.validate(
-        "MATCH (m:Metric) WITH collect(m.name) AS a, collect(m.name) AS b "
-        "RETURN a + b LIMIT 20",
+        "MATCH (m:Metric) WITH collect(m.name) AS a, collect(m.name) AS b RETURN a + b LIMIT 20",
         dialect="puppygraph",
     )
     assert any("List concatenation" in i.message for i in bad)
@@ -158,15 +157,52 @@ def test_optimize_caps_collect_distinct():
 
 def test_optimize_drops_distinct_with_agg():
     """PJT-97: DISTINCT beside agg — optimize raises (no silent DISTINCT drop)."""
-    q = (
-        "MATCH (a:Person)-[:R]->(b:Item) "
-        "RETURN DISTINCT a.name AS n, count(b) AS c LIMIT 10"
-    )
+    q = "MATCH (a:Person)-[:R]->(b:Item) RETURN DISTINCT a.name AS n, count(b) AS c LIMIT 10"
     with pytest.raises(ValidationError) as ei:
         cypherast.optimize(q, write="puppygraph")
     assert "DISTINCT" in str(ei.value).upper() or "aggregate" in str(ei.value).lower()
     soft = cypherast.optimize(q, write="puppygraph", strict=False)
     assert "DISTINCT" in soft.cypher(dialect="puppygraph").upper()
+
+
+def test_mixed_aggregate_projection_rejected():
+    """Engine AggregationMixingCheck: a grouping key may not sit inside an aggregate expression."""
+    q = (
+        "MATCH (exp:Experiment{state_name: 'ACTIVE'})-[:TRACKS_METRIC]->(m:Metric) "
+        "WITH count(DISTINCT exp) AS used "
+        "MATCH (exp2:Experiment{state_name: 'ACTIVE'}) "
+        "RETURN used, count(DISTINCT exp2) AS total, "
+        "toFloat(used) / toFloat(count(DISTINCT exp2)) * 100.0 AS pct LIMIT 20"
+    )
+    issues = cypherast.validate(q, dialect="puppygraph")
+    assert any(i.code == "CG1401" and "Aggregate mixed" in i.message for i in issues)
+    with pytest.raises(ValidationError):
+        cypherast.optimize(q, write="puppygraph")
+
+
+def test_mixed_aggregate_projection_split_with_ok():
+    """Aggregating in its own WITH first, then combining aliases, passes."""
+    q = (
+        "MATCH (exp:Experiment{state_name: 'ACTIVE'})-[:TRACKS_METRIC]->(m:Metric) "
+        "WITH count(DISTINCT exp) AS used "
+        "MATCH (exp2:Experiment{state_name: 'ACTIVE'}) "
+        "WITH used, count(DISTINCT exp2) AS total "
+        "RETURN used, total, toFloat(used) / toFloat(total) * 100.0 AS pct LIMIT 20"
+    )
+    assert not any(
+        "Aggregate mixed" in i.message for i in cypherast.validate(q, dialect="puppygraph")
+    )
+
+
+def test_aggregate_arithmetic_beside_grouping_key_ok():
+    """Arithmetic over aggregates alone is fine; keys count only as standalone items."""
+    for q in (
+        "MATCH (m:Metric) RETURN count(*) + 1 AS x LIMIT 20",
+        "MATCH (m:Metric) RETURN m.status AS s, count(*) * 2 AS x LIMIT 20",
+    ):
+        assert not any(
+            "Aggregate mixed" in i.message for i in cypherast.validate(q, dialect="puppygraph")
+        )
 
 
 def test_pattern_predicate_no_exists_on_puppygraph():
@@ -302,7 +338,9 @@ def test_optimize_labels_multi_rel_end():
         schema=gs,
     )
     out = opt.cypher(dialect="puppygraph")
-    assert "person|software" in out.lower() or (":person" in out.lower() and "software" in out.lower())
+    assert "person|software" in out.lower() or (
+        ":person" in out.lower() and "software" in out.lower()
+    )
     issues = cypherast.validate(opt, dialect="puppygraph")
     assert not any(i.code == "CG1402" for i in issues)
 
@@ -460,8 +498,7 @@ def test_harness_reject_apt18_et06_union_id_scope_varlen():
         "RETURN CASE WHEN size(items) > 0 THEN items ELSE ['x'] END LIMIT 20"
     )
     assert any(
-        "Case" in i.message or "CASE" in i.message or "ET-17" in (i.hint or "")
-        for i in et17_list
+        "Case" in i.message or "CASE" in i.message or "ET-17" in (i.hint or "") for i in et17_list
     ), et17_list
     must_raise(
         "MATCH (m:Metric) WITH collect(DISTINCT m.name) AS items "
@@ -475,8 +512,7 @@ def test_harness_reject_apt18_et06_union_id_scope_varlen():
         "RETURN CASE WHEN size(items) > 0 THEN items ELSE {a: 1} END LIMIT 20"
     )
     assert any(
-        "Case" in i.message or "CASE" in i.message or "ET-17" in (i.hint or "")
-        for i in et17_map
+        "Case" in i.message or "CASE" in i.message or "ET-17" in (i.hint or "") for i in et17_map
     ), et17_map
     must_raise(
         "MATCH (m:Metric) WITH collect(DISTINCT m.name) AS items "
@@ -521,19 +557,16 @@ def test_harness_reject_apt18_et06_union_id_scope_varlen():
 
     # FET-45: optimize wraps with CASE null guard
     fet45_q = (
-        "MATCH (m:Metric) OPTIONAL MATCH (m)-[:DERIVED_FROM]->(b:Metric) "
-        "RETURN id(b) LIMIT 20"
+        "MATCH (m:Metric) OPTIONAL MATCH (m)-[:DERIVED_FROM]->(b:Metric) RETURN id(b) LIMIT 20"
     )
     assert any(
-        "OPTIONAL-bound" in i.message
-        for i in cypherast.validate(fet45_q, dialect="puppygraph")
+        "OPTIONAL-bound" in i.message for i in cypherast.validate(fet45_q, dialect="puppygraph")
     )
     fet45_opt = cypherast.optimize(fet45_q, write="puppygraph")
     out45 = fet45_opt.cypher(dialect="puppygraph")
     assert "CASE WHEN" in out45.upper() and "IS NULL" in out45.upper()
     assert not any(
-        "OPTIONAL-bound" in i.message
-        for i in cypherast.validate(fet45_opt, dialect="puppygraph")
+        "OPTIONAL-bound" in i.message for i in cypherast.validate(fet45_opt, dialect="puppygraph")
     )
 
     ideq = soft_issues("MATCH (m:Metric) WHERE id(m) = 'bare_key' RETURN m LIMIT 20")
@@ -585,18 +618,14 @@ def test_fet45_optimize_adds_null_guard():
         "MATCH (m:Metric) OPTIONAL MATCH (cat:Catalog)-[:HAS_SOURCE]->(st:SourceTable) "
         "RETURN replace(split(toString(id(cat)), '[')[1], ']', '') AS table LIMIT 20"
     )
-    assert any(
-        "OPTIONAL-bound" in i.message
-        for i in cypherast.validate(q, dialect="puppygraph")
-    )
+    assert any("OPTIONAL-bound" in i.message for i in cypherast.validate(q, dialect="puppygraph"))
     opt = cypherast.optimize(q, write="puppygraph")
     out = opt.cypher(dialect="puppygraph")
     assert "CASE WHEN" in out.upper()
     assert "cat IS NULL" in out.replace("  ", " ")
     assert "AS table" in out
     assert not any(
-        "OPTIONAL-bound" in i.message
-        for i in cypherast.validate(opt, dialect="puppygraph")
+        "OPTIONAL-bound" in i.message for i in cypherast.validate(opt, dialect="puppygraph")
     )
 
 

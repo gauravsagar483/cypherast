@@ -21,6 +21,7 @@ from cypherast.dialects.validate.list_ops import (
     _list_concat_ops,
     _node_in_list_membership,
 )
+from cypherast.dialects.validate.mixed_aggregate import _mixed_aggregate_projection
 from cypherast.dialects.validate.nulls_order import _nulls_order_modifiers
 from cypherast.dialects.validate.opencypher import (
     _reject_call_subquery,
@@ -111,6 +112,8 @@ def validate_capabilities(
         issues.extend(_too_many_collect_distinct(tree, caps.max_collect_distinct_per_clause))
     if not caps.allow_collect_distinct_with_other_aggregates:
         issues.extend(_collect_distinct_with_other_aggregates(tree))
+    if not caps.allow_mixed_aggregate_projection:
+        issues.extend(_mixed_aggregate_projection(tree))
     if caps.require_matching_union_columns:
         issues.extend(_union_column_mismatch(tree))
     if caps.check_undefined_variables:

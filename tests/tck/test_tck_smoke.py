@@ -32,6 +32,42 @@ def test_run_tck_noop():
     assert board.total == 0
 
 
+def test_parse_only_expands_outlines_and_accepts_compile_rejection(tmp_path: Path) -> None:
+    feature = tmp_path / "outline.feature"
+    feature.write_text(
+        """
+Feature: parse coverage
+
+  Scenario Outline: radix <value>
+    When executing query:
+      \"\"\"
+      RETURN <value> AS literal
+      \"\"\"
+    Then the result should be:
+      | literal |
+      | <result> |
+
+    Examples:
+      | value | result |
+      | 0x10  | 16     |
+      | 0o10  | 8      |
+
+  Scenario: invalid query is a compile-time case
+    When executing query:
+      \"\"\"
+      RETURN [,]
+      \"\"\"
+    Then a SyntaxError should be raised at compile time: InvalidArgumentType
+""",
+        encoding="utf-8",
+    )
+
+    board = run_tck(tmp_path, parse_only=True, dialect="opencypher")
+    assert board.total == 3
+    assert board.skipped == 0
+    assert board.parse_rate == 1.0
+
+
 def test_run_dialect_matrix_noop():
     board = run_dialect_matrix(Path("/nonexistent/tck"))
     assert board.baseline.total == 0
@@ -89,7 +125,7 @@ def test_extract_error_expectation():
     assert _extract_error_expectation(body) == ("SyntaxError", "compile time", "UndefinedVariable")
 
 
-def test_run_skip_reason_unparseable():
+def test_run_skip_reason_parseable_radix_literal():
     body = """
     When executing query:
       \"\"\"
@@ -99,7 +135,7 @@ def test_run_skip_reason_unparseable():
       | v |
     """
     reason = _run_skip_reason("hex literal", body, "RETURN 0x1")
-    assert reason == "query does not parse"
+    assert reason is None
 
 
 def test_run_skip_reason_procedure_stub():
