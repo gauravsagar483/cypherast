@@ -124,6 +124,6 @@ read-only PuppyGraph Cypher surface while preserving strict openCypher 9.
 
 - [ ] Run Ruff and mypy on changed modules.
 - [ ] Run full `make check`.
-- [ ] Run `drafts/puppy_surface_probe.py` against puppygraph-local.
+- [ ] Run `scripts/puppy_surface_probe.py` against puppygraph-local.
 - [ ] Compare changed supported/unsupported outcomes to golden tests.
 - [ ] Inspect git diff and report remaining gaps separately.
