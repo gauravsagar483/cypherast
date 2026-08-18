@@ -42,6 +42,7 @@ class PuppyGraph(OpenCypher):
         allow_exists_subquery=False,
         allow_count_subquery=False,
         allow_list_concat=True,
+        allow_list_ops_on_aggregates=False,
         allow_node_in_list_membership=False,
         allow_id_in_string_predicates=False,
         allow_element_id_in_string_predicates=True,

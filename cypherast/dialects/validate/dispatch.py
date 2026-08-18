@@ -18,6 +18,7 @@ from cypherast.dialects.validate.functions import _function_signature_issues
 from cypherast.dialects.validate.id_predicates import _id_in_string_predicates
 from cypherast.dialects.validate.issues import ConstraintIssue
 from cypherast.dialects.validate.list_ops import (
+    _aggregate_list_ops,
     _list_concat_ops,
     _node_in_list_membership,
 )
@@ -112,6 +113,8 @@ def validate_capabilities(
         issues.extend(_parameters(tree))
     if not caps.allow_list_concat:
         issues.extend(_list_concat_ops(tree))
+    if not caps.allow_list_ops_on_aggregates:
+        issues.extend(_aggregate_list_ops(tree))
     if not caps.allow_node_in_list_membership:
         issues.extend(_node_in_list_membership(tree))
     denied_id_functions = frozenset(

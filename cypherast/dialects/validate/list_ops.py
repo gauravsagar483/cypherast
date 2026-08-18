@@ -143,6 +143,104 @@ def _list_concat_ops(tree: a.AstNode) -> list[ConstraintIssue]:
     return []
 
 
+_LIST_AGGREGATES = frozenset({"collect"})
+
+
+def _is_list_aggregate(node: a.AstNode | None) -> bool:
+    return isinstance(node, a.FunctionCall) and str(node.name).lower() in _LIST_AGGREGATES
+
+
+def _aggregate_list_ops(tree: a.AstNode) -> list[ConstraintIssue]:
+    """ET-06 / ET-09: ``+`` or a comprehension applied to an aggregated list.
+
+    Inline list expressions stay valid because the engine builds them per row
+    (``[1] + [2]``, ``[n.name] + ['z']``, ``[v IN [1, 2] | v]``, and a
+    comprehension over a non-aggregate list binding such as ``range(1, 3)``).
+    A ``collect()`` result — used directly or carried through ``WITH`` — cannot
+    feed a binary operation or a comprehension.
+    """
+    agg_lists: set[str] = set()
+
+    def _aggregated(node: a.AstNode | None) -> bool:
+        if _is_list_aggregate(node):
+            return True
+        return isinstance(node, a.Identifier) and node.this in agg_lists
+
+    def _defines_aggregate_list(value: a.AstNode | None) -> bool:
+        """Only list-shaped aggregates propagate: ``size(collect(x))`` is scalar."""
+        if _aggregated(value):
+            return True
+        if isinstance(value, a.Add):
+            return _defines_aggregate_list(value.this) or _defines_aggregate_list(
+                value.expression
+            )
+        return False
+
+    def _check(node: a.AstNode) -> list[ConstraintIssue] | None:
+        for add in node.find_all(a.Add):
+            assert isinstance(add, a.Add)
+            if _aggregated(add.this) or _aggregated(add.expression):
+                return [
+                    ConstraintIssue(
+                        "CG1401",
+                        "List concatenation (+) on an aggregated list is not supported "
+                        "by this dialect",
+                        hint=(
+                            "Return the collect() alias as its own column, or build the "
+                            "list from rows before aggregating"
+                        ),
+                    )
+                ]
+        for comp in node.find_all(a.ListComprehension):
+            assert isinstance(comp, a.ListComprehension)
+            if _aggregated(comp.source):
+                return [
+                    ConstraintIssue(
+                        "CG1401",
+                        "List comprehension over an aggregated list is not supported "
+                        "by this dialect",
+                        hint=(
+                            "Project the scalar first, then aggregate: "
+                            "WITH x.name AS name … collect(DISTINCT name)"
+                        ),
+                    )
+                ]
+        return None
+
+    def _note_projection(expressions: list[a.AstNode] | None) -> None:
+        for expr in expressions or []:
+            if not isinstance(expr, a.Alias):
+                continue
+            alias = expr.alias.this if isinstance(expr.alias, a.Identifier) else expr.alias
+            if not isinstance(alias, str) or not alias:
+                continue
+            if _defines_aggregate_list(expr.this):
+                agg_lists.add(alias)
+            else:
+                agg_lists.discard(alias)
+
+    def _scan_query(q: a.Query) -> list[ConstraintIssue]:
+        nonlocal agg_lists
+        agg_lists = set()
+        for clause in q.clauses or []:
+            # Check before noting: a clause cannot reference its own new aliases.
+            hit = _check(clause)
+            if hit:
+                return hit
+            if isinstance(clause, (a.With, a.Return)):
+                _note_projection(clause.expressions)
+        return []
+
+    root = tree.this if isinstance(tree, a.Cypher) else tree
+    # Nested queries (CALL {…}, UNION) each get their own alias scope.
+    for q in root.find_all(a.Query):
+        assert isinstance(q, a.Query)
+        issues = _scan_query(q)
+        if issues:
+            return issues
+    return []
+
+
 def _node_in_list_membership(tree: a.AstNode) -> list[ConstraintIssue]:
     """ET-21: node variable on the left of ``IN`` (list membership)."""
     node_vars: set[str] = set()

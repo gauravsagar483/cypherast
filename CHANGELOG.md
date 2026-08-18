@@ -5,7 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.12] - 2026-08-18
+
+### Fixed
+
+- PuppyGraph no longer accepts list `+` or a list comprehension applied to a `collect()` result.
+  0.1.11 widened both capabilities from live-engine probes that only used inline list literals,
+  so engine-rejected shapes (`bases + ['x']` after `WITH collect(base.name) AS bases`,
+  `a + b` between two `collect()` aliases, `[x IN ms | x.name]` after `WITH collect(m) AS ms`)
+  validated clean and reached the engine as `[ET-06] Unsupported binary operation` /
+  `[ET-09] Unsupported List Comprehension Expression`. New `allow_list_ops_on_aggregates`
+  capability (off for PuppyGraph only) reports `CG1401` for those, scope-aware through `WITH`
+  chains and `CALL { … }`. Inline list expressions stay valid — `[1] + [2]`, `[n.name] + ['z']`,
+  `[v IN [1, 2] | v * 2]`, a comprehension over a non-aggregate list binding such as
+  `range(1, 3)`, string concat, and scalar aggregate arithmetic like `size(collect(x)) + 1` —
+  all re-verified against live PuppyGraph.
+
+## [0.1.11] - 2026-08-17
 
 ### Added
 
@@ -21,6 +37,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`count(*) + 1`) and standalone grouping keys beside aggregates stay valid. Left on for
   Neo4j / Memgraph / openCypher, which accept an exact standalone grouping key inside the
   aggregate expression.
+- PuppyGraph read surface aligned with the live engine instead of a stricter openCypher 9
+  guess. Shared openCypher gained `=~` regex parse/render, a temporal + verified scalar
+  function catalog, corrected `range(start, end[, step])`, and scoped quantifier binders for
+  `all`/`any`/`none`/`single`; `DialectCapabilities` gained function allow/deny sets with
+  per-function arity overrides plus independent gates for `id()` / `elementId()` string
+  predicates, map projection, EXISTS/COUNT subqueries, multi-label nodes, and write clauses.
+  PuppyGraph now allows unlabelled/bare `MATCH` without inventing a `:_Node` label (preserves
+  engine cardinality), Cartesian and connected multi-path, inline list comprehensions and inline
+  list concat (see the 0.1.12 fix for the `collect()` exclusions),
+  undirected relationships, `CALL { … }`, `exists(prop)`, `elementId()` in string predicates,
+  and bounded (including ranged) variable-length patterns; it rejects pattern comprehensions,
+  map projections, `EXISTS { … }` / `COUNT { … }` subqueries, unbounded variable-length
+  patterns, multi-label node patterns, write/admin clauses, `id()` in string predicates, and
+  unsupported functions/arities. Golden accept/reject tables encode the live-engine findings.
+- PuppyGraph parameter handling: parameter syntax stays parseable/renderable, but PuppyGraph
+  validation conservatively rejects direct parameter expressions (`$p`) since live behavior is
+  inconsistent, while still allowing parameter property access the AST can distinguish.
+
+### Changed
+
+- `version` bumped to `0.1.11` (pending release notes cut).
 
 ## [0.1.10] - 2026-08-08
 

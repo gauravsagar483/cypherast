@@ -75,7 +75,7 @@ This documents in-memory executor support only — not live Neo4j / Memgraph / P
 
 - `require_labelled_nodes`
 - `allow_cartesian_match_paths` / `rewrite_cartesian_match_paths`
-- `allow_list_concat`, `allow_distinct_with_aggregate`, …
+- `allow_list_concat`, `allow_list_ops_on_aggregates`, `allow_distinct_with_aggregate`, …
 - `allowed_functions`, `unsupported_functions`, `function_arity_overrides`
 - `allow_map_projection`, `allow_exists_subquery`, `allow_count_subquery`
 - `allow_write_clauses`, `allow_parameters`, `allow_multi_label_nodes`
@@ -96,7 +96,7 @@ PuppyGraph subclasses openCypher. On `optimize` / `validate` it typically:
 | Allow Cartesian and connected multi-path | Verified against the live engine |
 | Reject unbounded variable-length patterns | Use an explicit upper bound; no cypherast maximum for bounded forms |
 | Reject writes and admin clauses | PuppyGraph graph projection is read-only |
-| Allow list comprehensions / list concat | Reject pattern comprehensions and map projections |
+| Allow inline list comprehensions / list concat | Reject the same over a `collect()` result (ET-06 / ET-09); reject pattern comprehensions and map projections |
 | Allow `CALL { … }` and `exists(prop)` | Reject `EXISTS { … }` and `COUNT { … }` expressions |
 | Reject APT-18 / TE-14 / DISTINCT+agg landmines | Reject, don’t greenwash |
 | Strip `NULLS FIRST/LAST` | Rewrite |

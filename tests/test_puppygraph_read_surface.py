@@ -85,6 +85,47 @@ def test_verified_unsupported_constructs_are_rejected(query: str) -> None:
         cypherast.optimize(query, write="puppygraph")
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        # collect()-derived list carried through WITH, then concatenated (ET-06)
+        "MATCH (m:Metric)-[:DERIVED_FROM]->(b:Metric) "
+        "WITH m, collect(b.name) AS bases "
+        "RETURN m.name AS metric, bases + ['x'] AS combined",
+        "MATCH (m:Metric) "
+        "WITH collect(m.name) AS a, collect(m.name) AS c "
+        "RETURN a + c AS x",
+        # collect() aggregate concatenated inline (engine reports mixing / ET-06)
+        "MATCH (m:Metric) WITH collect(DISTINCT m.name) + [m.name] AS names RETURN names",
+        # comprehension over a collect()-derived binding (ET-09)
+        "MATCH (m:Metric) WITH collect(m) AS ms RETURN [x IN ms | x.name] AS names",
+    ],
+)
+def test_aggregate_derived_list_ops_are_rejected(query: str) -> None:
+    issues = cypherast.validate(query, dialect="puppygraph")
+    assert issues
+    assert any(
+        "concat" in i.message.lower() or "list comprehension" in i.message.lower()
+        for i in issues
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        # inline list literals — engine accepts
+        "RETURN [1] + [2] AS x",
+        "MATCH (m:Metric) RETURN [m.name] + ['z'] AS x",
+        # comprehension over an inline list / non-aggregate binding — engine accepts
+        "RETURN [v IN [1, 2] WHERE v > 1 | v * 2] AS x",
+        "MATCH (m:Metric) RETURN [v IN [m.name] WHERE v <> '' | v] AS x",
+        "MATCH (m:Metric) WITH m, range(1, 3) AS r RETURN [v IN r | v * 2] AS x",
+    ],
+)
+def test_inline_and_non_aggregate_list_ops_are_accepted(query: str) -> None:
+    assert not cypherast.validate(query, dialect="puppygraph")
+
+
 def test_puppygraph_coalesce_requires_exactly_two_arguments() -> None:
     assert not cypherast.validate("RETURN coalesce(null, 1)", dialect="puppygraph")
     for query in ("RETURN coalesce(1)", "RETURN coalesce(null, null, 1)"):

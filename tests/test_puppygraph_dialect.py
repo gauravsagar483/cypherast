@@ -84,17 +84,23 @@ def test_pattern_pred_reuse_ok_new_binder_rejected():
     assert "new variables" in str(ei.value).lower() or "Pattern predicates" in str(ei.value)
 
 
-def test_list_concat_and_string_concat_are_supported():
-    list_issues = cypherast.validate(
-        "MATCH (m:Metric) WITH collect(m.name) AS a, collect(m.name) AS b RETURN a + b LIMIT 20",
+def test_inline_list_concat_and_string_concat_are_supported():
+    """Engine builds inline lists per row; only aggregated lists trip ET-06."""
+    inline_issues = cypherast.validate(
+        "MATCH (m:Metric) RETURN [m.name] + ['x'] AS xs LIMIT 20",
         dialect="puppygraph",
     )
-    assert not any("List concatenation" in i.message for i in list_issues)
+    assert not any("List concatenation" in i.message for i in inline_issues)
     string_issues = cypherast.validate(
         "MATCH (m:Metric) RETURN split(m.name, '_')[0] + '_x' AS x LIMIT 20",
         dialect="puppygraph",
     )
     assert not any("List concatenation" in i.message for i in string_issues)
+    aggregated_issues = cypherast.validate(
+        "MATCH (m:Metric) WITH collect(m.name) AS a, collect(m.name) AS b RETURN a + b LIMIT 20",
+        dialect="puppygraph",
+    )
+    assert any("List concatenation" in i.message for i in aggregated_issues)
 
 
 def test_optimize_does_not_inject_limit():
@@ -377,7 +383,7 @@ def test_validate_list_concat_and_node_in_list():
         "MATCH (n:person) RETURN collect(n.name) + ['x'] AS xs LIMIT 5",
         dialect="puppygraph",
     )
-    assert not any("List concatenation" in i.message for i in issues)
+    assert any("List concatenation" in i.message for i in issues)
     issues2 = cypherast.validate(
         "MATCH (n:person) WHERE n IN [n] RETURN n LIMIT 5",
         dialect="puppygraph",
@@ -412,13 +418,22 @@ def test_harness_reject_apt18_et06_union_id_scope_varlen():
     et06 = soft_issues(
         "MATCH (m:Metric) WITH collect(DISTINCT m.name) + [m.name] AS names RETURN names LIMIT 20"
     )
-    assert not any("List concatenation" in i.message for i in et06)
+    assert any("List concatenation" in i.message for i in et06)
+    must_raise(
+        "MATCH (m:Metric) WITH collect(DISTINCT m.name) + [m.name] AS names RETURN names LIMIT 20",
+        "List concatenation",
+    )
 
     et06a = soft_issues(
         "MATCH (m:Metric)-[:DERIVED_FROM]->(base:Metric) WITH m, collect(base.name) AS bases "
         "RETURN m.name AS metric, bases + ['x'] AS combined LIMIT 20"
     )
-    assert not any("List concatenation" in i.message for i in et06a)
+    assert any("List concatenation" in i.message for i in et06a)
+    must_raise(
+        "MATCH (m:Metric)-[:DERIVED_FROM]->(base:Metric) WITH m, collect(base.name) AS bases "
+        "RETURN m.name AS metric, bases + ['x'] AS combined LIMIT 20",
+        "List concatenation",
+    )
 
     et21 = soft_issues(
         "MATCH (m:Metric)-[:DERIVED_FROM]->(base:Metric) WITH collect(base) AS bases "

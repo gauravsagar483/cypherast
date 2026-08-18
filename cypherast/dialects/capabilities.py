@@ -36,6 +36,10 @@ class DialectCapabilities:
     allow_exists_subquery: bool = True
     allow_count_subquery: bool = True
     allow_list_concat: bool = True
+    # Narrower than allow_list_concat / allow_list_comprehension: inline list
+    # expressions are fine, but ``+`` or a comprehension applied to a collect()
+    # result (direct or carried through WITH) is not.
+    allow_list_ops_on_aggregates: bool = True
     allow_node_in_list_membership: bool = True
     allow_parameters: bool = True
     # id()/elementId() used with CONTAINS / STARTS WITH / ENDS WITH / = string
